@@ -3,8 +3,7 @@
 from genlayer import *
 import json
 
-# CredChain — Decentralized CV Verification & Hiring Bond Platform
-# Phase 3: Add execute_verification with gl.nondet.web.render to read GitHub on-chain
+# CredChain — Phase 4: Add gl.nondet.exec_prompt with structured verdict JSON schema
 
 
 class Contract(gl.Contract):
@@ -61,15 +60,16 @@ class Contract(gl.Contract):
     @gl.public.write
     def execute_verification(self, request_id: str) -> None:
         """
-        Core AI verification. RULE #7: ALL gl.nondet.* MUST be inside run_nondet_unsafe.
+        Core AI verification using gl.nondet.web.render + gl.nondet.exec_prompt.
 
-        Phase 3: Reads GitHub and portfolio URLs on-chain via gl.nondet.web.render.
-        Evidence fetching happens here — the contract itself reads live web data,
-        not the user. This is what makes GenLayer non-negotiable.
+        The AI prompt instructs the model to analyze GitHub/portfolio content and
+        produce a structured verdict JSON with confidence score, verified/unverified
+        skill lists, reasoning, and fraud flag.
+
+        RULE #7: ALL gl.nondet.* MUST be inside run_nondet_unsafe.
         """
         if request_id not in self.verification_requests:
             raise Exception("Request not found: " + request_id)
-
         request_data = json.loads(self.verification_requests[request_id])
         if request_data.get("status") == "DONE":
             raise Exception("Verification already completed for request_id: " + request_id)
@@ -90,7 +90,6 @@ class Contract(gl.Contract):
         claimed_skills = candidate["claimed_skills"]
 
         def leader_fn():
-            # Step 1: Read GitHub profile on-chain — Solidity cannot do this
             github_content = ""
             github_readable = True
             try:
@@ -102,7 +101,6 @@ class Contract(gl.Contract):
                 github_readable = False
                 github_content = "GITHUB_UNREADABLE"
 
-            # Step 2: Read portfolio if provided
             portfolio_content = ""
             portfolio_readable = True
             if portfolio_url and portfolio_url.startswith("http"):
@@ -116,37 +114,66 @@ class Contract(gl.Contract):
                     portfolio_content = "PORTFOLIO_UNREADABLE"
             else:
                 portfolio_readable = False
-                portfolio_content = "NO_PORTFOLIO_URL"
 
-            # Auto-UNVERIFIED if all sources unreadable (skip exec_prompt)
             if not github_readable and not portfolio_readable:
-                auto_result = {
+                return json.dumps({
                     "verdict": "UNVERIFIED", "confidence": 0,
                     "verified_skills": [],
                     "unverified_skills": [s.strip() for s in claimed_skills.split(",")],
                     "reasoning": "All evidence sources were inaccessible.",
                     "fraud_detected": False,
                     "evidence_note": "auto_unverified_no_sources"
-                }
-                return json.dumps(auto_result)
+                })
 
-            # Phase 3 placeholder — exec_prompt added in next commit
-            placeholder = {
-                "verdict": "UNVERIFIED", "confidence": 0,
-                "verified_skills": [], "unverified_skills": [],
-                "reasoning": "Web content fetched. AI analysis pending.",
-                "fraud_detected": False
-            }
-            return json.dumps(placeholder)
+            # AI analysis prompt with structured output schema
+            analysis_task = f"""You are a senior technical HR verification expert.
+Analyze the evidence and determine if the candidate's claimed skills are genuinely demonstrated.
+
+CLAIMED SKILLS: {claimed_skills}
+
+GITHUB PROFILE CONTENT (first 3000 chars):
+{github_content[:3000]}
+
+PORTFOLIO CONTENT (first 2000 chars):
+{portfolio_content[:2000]}
+
+VERDICT CRITERIA:
+- VERIFIED = >=70% of claimed skills clearly evidenced by repos/commits/projects
+- PARTIAL = 30-69% of claimed skills evidenced
+- UNVERIFIED = <30% evidenced OR all sources inaccessible
+- fraud_detected = true ONLY if evidence actively contradicts claims
+
+Respond with ONLY a JSON object (no markdown):
+{{
+  "verdict": "VERIFIED" or "PARTIAL" or "UNVERIFIED",
+  "confidence": <integer 0-100>,
+  "verified_skills": [<skill strings>],
+  "unverified_skills": [<skill strings>],
+  "reasoning": "<2-3 sentences citing specific evidence>",
+  "fraud_detected": <true or false>
+}}"""
+
+            return gl.nondet.exec_prompt(analysis_task, response_format="json")
 
         def validator_fn(leader_result) -> bool:
             if not isinstance(leader_result, gl.vm.Return):
                 return False
             try:
                 data = json.loads(leader_result.value)
-                return data.get("verdict") in {"VERIFIED", "PARTIAL", "UNVERIFIED"}
             except Exception:
                 return False
+            if data.get("verdict") not in {"VERIFIED", "PARTIAL", "UNVERIFIED"}:
+                return False
+            confidence = data.get("confidence", -1)
+            if not isinstance(confidence, int) or not (0 <= confidence <= 100):
+                return False
+            if not isinstance(data.get("verified_skills"), list):
+                return False
+            if not isinstance(data.get("unverified_skills"), list):
+                return False
+            if not isinstance(data.get("fraud_detected"), bool):
+                return False
+            return True
 
         result_raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
         result_data = json.loads(result_raw)
@@ -154,6 +181,7 @@ class Contract(gl.Contract):
         req = json.loads(self.verification_requests[request_id])
         candidate_address = req["candidate_address"]
         result_data["verified_at"] = int(gl.message.timestamp)
+        result_data["request_id"] = request_id
         self.verifications[candidate_address] = json.dumps(result_data)
 
         cand_obj = json.loads(self.candidates[candidate_address])
@@ -161,7 +189,15 @@ class Contract(gl.Contract):
         self.candidates[candidate_address] = json.dumps(cand_obj)
 
         req["status"] = "DONE"
+        req["completed_at"] = int(gl.message.timestamp)
         self.verification_requests[request_id] = json.dumps(req)
+
+        if result_data.get("fraud_detected", False):
+            self.blacklist[candidate_address] = True
+            self.stakes[candidate_address] = u256(0)
+            cand_obj = json.loads(self.candidates[candidate_address])
+            cand_obj["status"] = "BLACKLISTED"
+            self.candidates[candidate_address] = json.dumps(cand_obj)
 
     @gl.public.view
     def get_candidate_profile(self, address: str) -> str:
