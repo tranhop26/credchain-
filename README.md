@@ -176,7 +176,7 @@ cd frontend && npm run dev
 
 ## Live Demo
 
-- **App:** [VERCEL_URL — add after deploy]
+- **App:** https://credchain-eight.vercel.app/
 - **Video:** [YOUTUBE/LOOM — add after recording]
 - **Contract:** `0x9DCED4d359A2969EA094c5DF674e01f3AB309CBf` (GenLayer Studionet)
 
