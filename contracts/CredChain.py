@@ -4,7 +4,7 @@ from genlayer import *
 import json
 
 # CredChain — Decentralized CV Verification & Hiring Bond Platform
-# Phase 2: Add request_verification flow with auto-increment request_counter
+# Phase 3: Add execute_verification with gl.nondet.web.render to read GitHub on-chain
 
 
 class Contract(gl.Contract):
@@ -42,20 +42,12 @@ class Contract(gl.Contract):
 
     @gl.public.write
     def request_verification(self, candidate_address: str) -> str:
-        """
-        Employer requests AI verification. Creates PENDING request on-chain.
-        Returns request_id string for use with execute_verification().
-        """
         if candidate_address not in self.candidates:
             raise Exception("Candidate not registered")
-
         if self.blacklist.get(candidate_address, False):
             raise Exception("Candidate is blacklisted — verification denied")
-
-        # Auto-increment: each request gets a unique sequential ID
         request_id = str(int(self.request_counter))
         self.request_counter = self.request_counter + u256(1)
-
         request_data = {
             "request_id": request_id,
             "candidate_address": candidate_address,
@@ -65,6 +57,111 @@ class Contract(gl.Contract):
         }
         self.verification_requests[request_id] = json.dumps(request_data)
         return request_id
+
+    @gl.public.write
+    def execute_verification(self, request_id: str) -> None:
+        """
+        Core AI verification. RULE #7: ALL gl.nondet.* MUST be inside run_nondet_unsafe.
+
+        Phase 3: Reads GitHub and portfolio URLs on-chain via gl.nondet.web.render.
+        Evidence fetching happens here — the contract itself reads live web data,
+        not the user. This is what makes GenLayer non-negotiable.
+        """
+        if request_id not in self.verification_requests:
+            raise Exception("Request not found: " + request_id)
+
+        request_data = json.loads(self.verification_requests[request_id])
+        if request_data.get("status") == "DONE":
+            raise Exception("Verification already completed for request_id: " + request_id)
+
+        candidate_address = request_data["candidate_address"]
+        if candidate_address not in self.candidates:
+            raise Exception("Candidate not registered")
+        if self.blacklist.get(candidate_address, False):
+            raise Exception("Candidate is blacklisted")
+
+        stake_amount = self.stakes.get(candidate_address, u256(0))
+        if stake_amount == u256(0):
+            raise Exception("Insufficient bond: candidate must stake before verification.")
+
+        candidate = json.loads(self.candidates[candidate_address])
+        github_url = candidate["github_url"]
+        portfolio_url = candidate.get("portfolio_url", "")
+        claimed_skills = candidate["claimed_skills"]
+
+        def leader_fn():
+            # Step 1: Read GitHub profile on-chain — Solidity cannot do this
+            github_content = ""
+            github_readable = True
+            try:
+                github_content = gl.nondet.web.render(github_url, mode="text")
+                if not github_content or len(github_content.strip()) < 50:
+                    github_readable = False
+                    github_content = "GITHUB_UNREADABLE"
+            except Exception:
+                github_readable = False
+                github_content = "GITHUB_UNREADABLE"
+
+            # Step 2: Read portfolio if provided
+            portfolio_content = ""
+            portfolio_readable = True
+            if portfolio_url and portfolio_url.startswith("http"):
+                try:
+                    portfolio_content = gl.nondet.web.render(portfolio_url, mode="text")
+                    if not portfolio_content or len(portfolio_content.strip()) < 50:
+                        portfolio_readable = False
+                        portfolio_content = "PORTFOLIO_UNREADABLE"
+                except Exception:
+                    portfolio_readable = False
+                    portfolio_content = "PORTFOLIO_UNREADABLE"
+            else:
+                portfolio_readable = False
+                portfolio_content = "NO_PORTFOLIO_URL"
+
+            # Auto-UNVERIFIED if all sources unreadable (skip exec_prompt)
+            if not github_readable and not portfolio_readable:
+                auto_result = {
+                    "verdict": "UNVERIFIED", "confidence": 0,
+                    "verified_skills": [],
+                    "unverified_skills": [s.strip() for s in claimed_skills.split(",")],
+                    "reasoning": "All evidence sources were inaccessible.",
+                    "fraud_detected": False,
+                    "evidence_note": "auto_unverified_no_sources"
+                }
+                return json.dumps(auto_result)
+
+            # Phase 3 placeholder — exec_prompt added in next commit
+            placeholder = {
+                "verdict": "UNVERIFIED", "confidence": 0,
+                "verified_skills": [], "unverified_skills": [],
+                "reasoning": "Web content fetched. AI analysis pending.",
+                "fraud_detected": False
+            }
+            return json.dumps(placeholder)
+
+        def validator_fn(leader_result) -> bool:
+            if not isinstance(leader_result, gl.vm.Return):
+                return False
+            try:
+                data = json.loads(leader_result.value)
+                return data.get("verdict") in {"VERIFIED", "PARTIAL", "UNVERIFIED"}
+            except Exception:
+                return False
+
+        result_raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+        result_data = json.loads(result_raw)
+
+        req = json.loads(self.verification_requests[request_id])
+        candidate_address = req["candidate_address"]
+        result_data["verified_at"] = int(gl.message.timestamp)
+        self.verifications[candidate_address] = json.dumps(result_data)
+
+        cand_obj = json.loads(self.candidates[candidate_address])
+        cand_obj["status"] = result_data["verdict"]
+        self.candidates[candidate_address] = json.dumps(cand_obj)
+
+        req["status"] = "DONE"
+        self.verification_requests[request_id] = json.dumps(req)
 
     @gl.public.view
     def get_candidate_profile(self, address: str) -> str:
