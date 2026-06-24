@@ -44,7 +44,7 @@ class Contract(gl.Contract):
         profile = {
             "name": name, "claimed_skills": claimed_skills,
             "github_url": github_url, "portfolio_url": portfolio_url,
-            "registered_at": int(gl.message.timestamp), "status": "PENDING"
+            "registered_at": 0, "status": "PENDING"
         }
         self.candidates[caller] = json.dumps(profile)
 
@@ -60,19 +60,20 @@ class Contract(gl.Contract):
         self.stakes[caller] = existing + amount
 
     @gl.public.write
-    def request_verification(self, candidate_address: str) -> str:
-        """Employer requests AI verification. Returns request_id."""
-        if candidate_address not in self.candidates:
+    def request_verification(self) -> str:
+        """Candidate requests AI verification of their own profile."""
+        caller = str(gl.message.sender_address)
+        if caller not in self.candidates:
             raise Exception("Candidate not registered")
-        if self.blacklist.get(candidate_address, False):
-            raise Exception("Candidate is blacklisted — verification denied")
+        if self.blacklist.get(caller, False):
+            raise Exception("Blacklisted candidates cannot request verification")
         request_id = str(int(self.request_counter))
         self.request_counter = self.request_counter + u256(1)
         request_data = {
             "request_id": request_id,
-            "candidate_address": candidate_address,
-            "requester": str(gl.message.sender_address),
-            "requested_at": int(gl.message.timestamp),
+            "candidate_address": caller,
+            "requester": caller,
+            "requested_at": 0,
             "status": "PENDING"
         }
         self.verification_requests[request_id] = json.dumps(request_data)
@@ -243,7 +244,7 @@ Respond ONLY with JSON:
 
         req = json.loads(self.verification_requests[request_id])
         candidate_address = req["candidate_address"]
-        result_data["verified_at"] = int(gl.message.timestamp)
+        result_data["verified_at"] = 0
         result_data["request_id"] = request_id
         self.verifications[candidate_address] = json.dumps(result_data)
 
@@ -252,7 +253,7 @@ Respond ONLY with JSON:
         self.candidates[candidate_address] = json.dumps(cand_obj)
 
         req["status"] = "DONE"
-        req["completed_at"] = int(gl.message.timestamp)
+        req["completed_at"] = 0
         self.verification_requests[request_id] = json.dumps(req)
 
         if result_data.get("fraud_detected", False):
@@ -263,12 +264,14 @@ Respond ONLY with JSON:
             self.candidates[candidate_address] = json.dumps(cand_obj)
 
     @gl.public.view
-    def get_candidate_profile(self, address: str) -> str:
-        return self.candidates.get(address, "")
+    def get_candidate_profile(self, address: Address) -> str:
+        addr_str = str(address)
+        return self.candidates.get(addr_str, "")
 
     @gl.public.view
-    def get_verification_result(self, address: str) -> str:
-        return self.verifications.get(address, "")
+    def get_verification_result(self, address: Address) -> str:
+        addr_str = str(address)
+        return self.verifications.get(addr_str, "")
 
     @gl.public.view
     def get_request(self, request_id: str) -> str:
@@ -279,9 +282,12 @@ Respond ONLY with JSON:
         return self.request_counter
 
     @gl.public.view
-    def get_stake(self, address: str) -> u256:
-        return self.stakes.get(address, u256(0))
+    def get_stake(self, address: Address) -> u256:
+        addr_str = str(address)
+        return self.stakes.get(addr_str, u256(0))
 
     @gl.public.view
-    def is_blacklisted(self, address: str) -> bool:
-        return self.blacklist.get(address, False)
+    def is_blacklisted(self, address: Address) -> bool:
+        addr_str = str(address)
+        return self.blacklist.get(addr_str, False)
+

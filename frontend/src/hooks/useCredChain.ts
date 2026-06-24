@@ -3,7 +3,7 @@ import { studionet } from 'genlayer-js/chains';
 import { useState, useCallback } from 'react';
 import { useWallet } from '../context/WalletContext';
 
-const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000') as `0x${string}`;
+const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0xE26D6AE536E44714Ea81a29e0A81DF7dA3bD93eA') as `0x${string}`;
 
 if (!import.meta.env.VITE_CONTRACT_ADDRESS) {
   console.warn('VITE_CONTRACT_ADDRESS is not configured');
@@ -139,10 +139,10 @@ export function useCredChain() {
   }, [startTx, succeedTx, failTx, sendWrite]);
 
   // ── requestVerification ───────────────────────────────────────────────────
-  const requestVerification = useCallback(async (candidateAddress: string): Promise<string | null> => {
-    startTx('Requesting AI verification...');
+  const requestVerification = useCallback(async (): Promise<string | null> => {
+    startTx('Requesting AI verification of your profile...');
     try {
-      const hash = await sendWrite('request_verification', [candidateAddress]);
+      const hash = await sendWrite('request_verification', []);
       const counter = await sendRead<bigint>('get_request_counter', []);
       const requestId = String(Number(counter) - 1);
       succeedTx(hash, `Verification requested! Request ID: ${requestId}`);

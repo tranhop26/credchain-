@@ -39,7 +39,7 @@ export function EmployerPage() {
   const handleRequestVerification = async () => {
     if (!candidateAddr) return;
     resetTx();
-    const id = await requestVerification(candidateAddr);
+    const id = await requestVerification();
     if (id !== null) {
       setRequestId(id);
       setStep(2);
