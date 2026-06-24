@@ -1,20 +1,17 @@
-import { createClient, createAccount } from 'genlayer-js';
+import { createClient } from 'genlayer-js';
 import { studionet } from 'genlayer-js/chains';
-import { TransactionStatus } from 'genlayer-js/types';
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
+import { useWallet } from '../context/WalletContext';
 
-// ─── Client Setup ────────────────────────────────────────────────────────────
-// CONTRACT_ADDRESS is set via .env.local → VITE_CONTRACT_ADDRESS
 const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000') as `0x${string}`;
 
-// Read client – no wallet needed
+if (!import.meta.env.VITE_CONTRACT_ADDRESS) {
+  console.warn('VITE_CONTRACT_ADDRESS is not configured');
+}
+
+// Read-only client
 const readClient = createClient({ chain: studionet });
 
-// Write account (demo key — in prod this would be MetaMask via window.ethereum)
-const writeAccount = createAccount();
-const writeClient = createClient({ chain: studionet, account: writeAccount.address });
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 export interface CandidateProfile {
   name: string;
   claimed_skills: string;
@@ -43,7 +40,6 @@ export interface TxState {
   error?: string;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 function parseJson<T>(raw: string): T | null {
   if (!raw || raw === '') return null;
   try { return JSON.parse(raw) as T; }
@@ -57,39 +53,22 @@ function friendlyError(e: unknown): string {
   if (msg.includes('not registered')) return 'This address is not registered as a candidate.';
   if (msg.includes('already completed')) return 'This verification request has already been processed.';
   if (msg.includes('not found')) return 'Verification request not found. Check the request ID.';
-  if (msg.includes('CONTRACT_ADDRESS')) return 'Contract address not configured. Set VITE_CONTRACT_ADDRESS in .env.local';
+  if (msg.includes('CONTRACT_ADDRESS')) return 'Contract address not configured.';
+  if (msg.includes('wallet') || msg.includes('MetaMask')) return 'Please connect your MetaMask wallet first.';
   return msg.length > 200 ? msg.slice(0, 200) + '...' : msg;
-}
-
-async function sendWrite(fnName: string, args: unknown[]): Promise<string> {
-  const txHash = await writeClient.writeContract({
-    account: writeAccount,
-    address: CONTRACT_ADDRESS,
-    functionName: fnName,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    args: args as any[],
-    value: BigInt(0),
-  });
-  await writeClient.waitForTransactionReceipt({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    hash: txHash as any,
-    status: TransactionStatus.FINALIZED,
-  });
-  return txHash as string;
 }
 
 async function sendRead<T>(fnName: string, args: unknown[]): Promise<T> {
   const result = await readClient.readContract({
     address: CONTRACT_ADDRESS,
     functionName: fnName,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     args: args as any[],
   });
   return result as T;
 }
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
 export function useCredChain() {
+  const { address } = useWallet();
   const [txState, setTxState] = useState<TxState>({ status: 'idle' });
 
   const startTx = useCallback((msg: string) => {
@@ -108,6 +87,34 @@ export function useCredChain() {
     setTxState({ status: 'idle' });
   }, []);
 
+  // Write via MetaMask (window.ethereum)
+  const sendWrite = useCallback(async (fnName: string, args: unknown[]): Promise<string> => {
+    if (!address) throw new Error('wallet not connected — please connect MetaMask first');
+    const eth = (window as any).ethereum;
+    if (!eth) throw new Error('MetaMask not found');
+
+    const walletClient = createClient({
+      chain: studionet,
+      // @ts-ignore — injected transport
+      transport: eth,
+    });
+
+    const txHash = await (walletClient as any).writeContract({
+      address: CONTRACT_ADDRESS,
+      functionName: fnName,
+      args: args as any[],
+      account: address as `0x${string}`,
+      value: BigInt(0),
+    });
+
+    await readClient.waitForTransactionReceipt({
+      hash: txHash as any,
+      status: 'FINALIZED' as any,
+    });
+
+    return txHash as string;
+  }, [address]);
+
   // ── registerCandidate ──────────────────────────────────────────────────────
   const registerCandidate = useCallback(async (
     name: string,
@@ -120,65 +127,61 @@ export function useCredChain() {
       const hash = await sendWrite('register_candidate', [name, claimedSkills, githubUrl, portfolioUrl]);
       succeedTx(hash, 'Candidate registered successfully!');
     } catch (e) { failTx(e); }
-  }, [startTx, succeedTx, failTx]);
+  }, [startTx, succeedTx, failTx, sendWrite]);
 
   // ── stakeBond ──────────────────────────────────────────────────────────────
   const stakeBond = useCallback(async (amount: number) => {
     startTx(`Staking bond of ${amount} units...`);
     try {
       const hash = await sendWrite('stake_bond', [BigInt(amount)]);
-      succeedTx(hash, `Bond of ${amount} units staked successfully!`);
+      succeedTx(hash, `Bond of ${amount} units staked!`);
     } catch (e) { failTx(e); }
-  }, [startTx, succeedTx, failTx]);
+  }, [startTx, succeedTx, failTx, sendWrite]);
 
   // ── requestVerification ───────────────────────────────────────────────────
-  const requestIdRef = useRef<string | null>(null);
   const requestVerification = useCallback(async (candidateAddress: string): Promise<string | null> => {
     startTx('Requesting AI verification...');
     try {
       const hash = await sendWrite('request_verification', [candidateAddress]);
-      // Read the request counter to find the latest request_id
       const counter = await sendRead<bigint>('get_request_counter', []);
       const requestId = String(Number(counter) - 1);
-      requestIdRef.current = requestId;
       succeedTx(hash, `Verification requested! Request ID: ${requestId}`);
       return requestId;
     } catch (e) { failTx(e); return null; }
-  }, [startTx, succeedTx, failTx]);
+  }, [startTx, succeedTx, failTx, sendWrite]);
 
   // ── executeVerification ───────────────────────────────────────────────────
   const executeVerification = useCallback(async (requestId: string) => {
-    startTx('AI validators are analyzing GitHub & portfolio evidence... (30–60 seconds)');
+    startTx('AI validators analyzing GitHub & portfolio... (30–60s)');
     try {
       const hash = await sendWrite('execute_verification', [requestId]);
       succeedTx(hash, 'AI verification complete! Fetching verdict...');
     } catch (e) { failTx(e); }
-  }, [startTx, succeedTx, failTx]);
+  }, [startTx, succeedTx, failTx, sendWrite]);
 
   // ── Getters ────────────────────────────────────────────────────────────────
-  const getCandidateProfile = useCallback(async (address: string): Promise<CandidateProfile | null> => {
+  const getCandidateProfile = useCallback(async (addr: string): Promise<CandidateProfile | null> => {
     try {
-      const raw = await sendRead<string>('get_candidate_profile', [address]);
+      const raw = await sendRead<string>('get_candidate_profile', [addr]);
       return parseJson<CandidateProfile>(raw);
     } catch { return null; }
   }, []);
 
-  const getVerificationResult = useCallback(async (address: string): Promise<VerificationResult | null> => {
+  const getVerificationResult = useCallback(async (addr: string): Promise<VerificationResult | null> => {
     try {
-      const raw = await sendRead<string>('get_verification_result', [address]);
+      const raw = await sendRead<string>('get_verification_result', [addr]);
       return parseJson<VerificationResult>(raw);
     } catch { return null; }
   }, []);
 
-  const isBlacklisted = useCallback(async (address: string): Promise<boolean> => {
-    try {
-      return await sendRead<boolean>('is_blacklisted', [address]);
-    } catch { return false; }
+  const isBlacklisted = useCallback(async (addr: string): Promise<boolean> => {
+    try { return await sendRead<boolean>('is_blacklisted', [addr]); }
+    catch { return false; }
   }, []);
 
-  const getStake = useCallback(async (address: string): Promise<number> => {
+  const getStake = useCallback(async (addr: string): Promise<number> => {
     try {
-      const raw = await sendRead<bigint>('get_stake', [address]);
+      const raw = await sendRead<bigint>('get_stake', [addr]);
       return Number(raw);
     } catch { return 0; }
   }, []);
@@ -187,7 +190,7 @@ export function useCredChain() {
     txState, resetTx,
     registerCandidate, stakeBond, requestVerification, executeVerification,
     getCandidateProfile, getVerificationResult, isBlacklisted, getStake,
-    callerAddress: writeAccount.address,
+    callerAddress: address ?? '',
     contractAddress: CONTRACT_ADDRESS,
   };
 }
