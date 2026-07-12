@@ -5,7 +5,10 @@ import { VerificationResultCard } from '../components/VerificationResult';
 import { SkillBadge } from '../components/SkillBadge';
 import { useCredChain, type CandidateProfile, type VerificationResult } from '../hooks/useCredChain';
 
+import { useWallet } from '../context/WalletContext';
+
 export function CandidatePage() {
+  const { error: walletError } = useWallet();
   const {
     txState, resetTx,
     registerCandidate, stakeBond,
@@ -40,10 +43,10 @@ export function CandidatePage() {
     portfolioUrl: string; stakeAmount: number;
   }) => {
     resetTx();
-    await registerCandidate(data.name, data.claimedSkills, data.githubUrl, data.portfolioUrl);
-    if (txState.status !== 'error') {
-      await stakeBond(data.stakeAmount);
-    }
+    const registerSuccess = await registerCandidate(data.name, data.claimedSkills, data.githubUrl, data.portfolioUrl);
+    if (!registerSuccess) return;
+
+    await stakeBond(data.stakeAmount);
     await refreshProfile();
   };
 
@@ -65,6 +68,13 @@ export function CandidatePage() {
           read your GitHub live on-chain and issue a tamper-proof verification verdict.
         </p>
       </div>
+
+      {walletError && (
+        <div className="error-alert fade-in" style={{ marginBottom: '1.5rem' }}>
+          <span style={{ flexShrink: 0 }}>⚠</span>
+          <span>{walletError}</span>
+        </div>
+      )}
 
       {/* Your Address */}
       <div className="card" style={{ marginBottom: '1.5rem' }}>

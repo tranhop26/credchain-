@@ -3,7 +3,10 @@ import { TxStatus } from '../components/TxStatus';
 import { VerificationResultCard } from '../components/VerificationResult';
 import { useCredChain, type VerificationResult, type CandidateProfile } from '../hooks/useCredChain';
 
+import { useWallet } from '../context/WalletContext';
+
 export function EmployerPage() {
+  const { error: walletError } = useWallet();
   const {
     txState, resetTx,
     requestVerification, executeVerification,
@@ -74,6 +77,13 @@ export function EmployerPage() {
           GitHub live, reasons about their skills, and commits a tamper-proof verdict.
         </p>
       </div>
+
+      {walletError && (
+        <div className="error-alert fade-in" style={{ marginBottom: '1.5rem' }}>
+          <span style={{ flexShrink: 0 }}>⚠</span>
+          <span>{walletError}</span>
+        </div>
+      )}
 
       {/* Step 0 — Lookup */}
       <div className="card" style={{ marginBottom: '1.5rem' }} id="employer-lookup-card">

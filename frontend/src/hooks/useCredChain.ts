@@ -48,25 +48,29 @@ function parseJson<T>(raw: string): T | null {
 }
 
 function friendlyError(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e);
-  if (msg.includes('Insufficient bond')) return 'You must stake a bond before requesting verification.';
-  if (msg.includes('blacklisted')) return 'This candidate is blacklisted and cannot be verified.';
-  if (msg.includes('not registered')) return 'This address is not registered as a candidate.';
-  if (msg.includes('already completed')) return 'This verification request has already been processed.';
-  if (msg.includes('not found')) return 'Verification request not found. Check the request ID.';
-  if (msg.includes('CONTRACT_ADDRESS')) return 'Contract address not configured.';
-  if (
-    msg.includes('wallet') || 
-    msg.includes('MetaMask') || 
-    msg.includes('undefined') || 
-    msg.includes('invalid') || 
-    msg.includes('Address') || 
-    msg.includes('account') || 
-    msg.includes('connect')
-  ) {
-    return 'Please connect your wallet first';
+  console.error('[Raw Error Diagnostics]', e);
+
+  if (e instanceof Error) {
+    const err = e as any;
+    const msg = err.message || '';
+
+    if (msg === 'Please connect your wallet first') {
+      return msg;
+    }
+
+    if (msg.includes('Insufficient bond')) return 'You must stake a bond before requesting verification.';
+    if (msg.includes('blacklisted')) return 'This candidate is blacklisted and cannot be verified.';
+    if (msg.includes('not registered')) return 'This address is not registered as a candidate.';
+    if (msg.includes('already completed')) return 'This verification request has already been processed.';
+    if (msg.includes('not found')) return 'Verification request not found. Check the request ID.';
+    if (msg.includes('CONTRACT_ADDRESS')) return 'Contract address not configured.';
+
+    const realMsg = err.shortMessage || err.details || err.cause?.message || err.message || String(e);
+    return realMsg.length > 200 ? realMsg.slice(0, 200) + '...' : realMsg;
   }
-  return msg.length > 200 ? msg.slice(0, 200) + '...' : msg;
+
+  const msgStr = String(e);
+  return msgStr.length > 200 ? msgStr.slice(0, 200) + '...' : msgStr;
 }
 
 async function sendRead<T>(fnName: string, args: unknown[]): Promise<T> {
@@ -101,8 +105,46 @@ export function useCredChain() {
   // Write via MetaMask (window.ethereum)
   const sendWrite = useCallback(async (fnName: string, args: unknown[]): Promise<string> => {
     const eth = (window as any).ethereum;
-    if (!eth) throw new Error('MetaMask not found');
+    if (!eth) throw new Error('Please connect your wallet first');
 
+    // 1. Validate the connected chain and switch/add GenLayer Studionet network
+    let currentChainId: string;
+    try {
+      currentChainId = await eth.request({ method: 'eth_chainId' });
+    } catch (e) {
+      throw new Error(`Failed to query chain ID: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+    }
+
+    if (currentChainId !== '0xF23F' && currentChainId !== '0xf23f') {
+      try {
+        await eth.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0xF23F' }],
+        });
+        currentChainId = '0xF23F';
+      } catch (switchErr: any) {
+        if (switchErr.code === 4902) {
+          try {
+            await eth.request({
+              method: 'wallet_addEthereumChain',
+              params: [{
+                chainId: '0xF23F',
+                chainName: 'GenLayer Studionet',
+                nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
+                rpcUrls: ['https://studio.genlayer.com/api'],
+              }],
+            });
+            currentChainId = '0xF23F';
+          } catch (addErr: any) {
+            throw new Error(`Failed to add GenLayer Studionet network: ${addErr.message || addErr}`, { cause: addErr });
+          }
+        } else {
+          throw new Error(`Failed to switch to GenLayer Studionet network: ${switchErr.message || switchErr}`, { cause: switchErr });
+        }
+      }
+    }
+
+    // 2. Obtain active wallet address
     let accounts: string[];
     try {
       const currentAccounts = await eth.request({ method: 'eth_accounts' }) as string[];
@@ -124,10 +166,17 @@ export function useCredChain() {
       throw new Error('Please connect your wallet first');
     }
 
+    // 3. Print diagnostics information (NO keys or secrets)
+    console.log('[Diagnostic] Active Address:', activeAddress);
+    console.log('[Diagnostic] Current Chain ID:', currentChainId);
+    console.log('[Diagnostic] Contract Address:', CONTRACT_ADDRESS);
+    console.log('[Diagnostic] Function Name:', fnName);
+    console.log('[Diagnostic] Arguments:', args);
+
+    // 4. Set up wallet client with officially supported provider format
     const walletClient = createClient({
       chain: studionet,
-      // @ts-ignore — injected transport
-      transport: eth,
+      provider: eth,
     });
 
     const txHash = await (walletClient as any).writeContract({
@@ -152,21 +201,29 @@ export function useCredChain() {
     claimedSkills: string,
     githubUrl: string,
     portfolioUrl: string,
-  ) => {
+  ): Promise<boolean> => {
     startTx('Registering candidate on-chain...');
     try {
       const hash = await sendWrite('register_candidate', [name, claimedSkills, githubUrl, portfolioUrl]);
       succeedTx(hash, 'Candidate registered successfully!');
-    } catch (e) { failTx(e); }
+      return true;
+    } catch (e) {
+      failTx(e);
+      return false;
+    }
   }, [startTx, succeedTx, failTx, sendWrite]);
 
   // ── stakeBond ──────────────────────────────────────────────────────────────
-  const stakeBond = useCallback(async (amount: number) => {
+  const stakeBond = useCallback(async (amount: number): Promise<boolean> => {
     startTx(`Staking bond of ${amount} units...`);
     try {
       const hash = await sendWrite('stake_bond', [BigInt(amount)]);
       succeedTx(hash, `Bond of ${amount} units staked!`);
-    } catch (e) { failTx(e); }
+      return true;
+    } catch (e) {
+      failTx(e);
+      return false;
+    }
   }, [startTx, succeedTx, failTx, sendWrite]);
 
   // ── requestVerification ───────────────────────────────────────────────────
