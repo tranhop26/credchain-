@@ -6,6 +6,13 @@ import { isAddress } from 'viem';
 
 const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0xDfc880de4A0463e9E4368cE86Bd2C00BC4a0552f') as `0x${string}`;
 
+const STUDIONET_CHAIN = {
+  chainId: '0xF23F', // 61999
+  chainName: 'GenLayer Studionet',
+  nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
+  rpcUrls: ['https://studio.genlayer.com/api'],
+};
+
 if (!import.meta.env.VITE_CONTRACT_ADDRESS) {
   console.warn('VITE_CONTRACT_ADDRESS is not configured');
 }
@@ -47,10 +54,40 @@ function parseJson<T>(raw: string): T | null {
   catch { return null; }
 }
 
+function extractErrorMessage(error: unknown): string {
+  if (typeof error === "string") return error;
+
+  if (error && typeof error === "object") {
+    const e = error as any;
+
+    const message =
+      e.shortMessage ||
+      e.details ||
+      e.cause?.shortMessage ||
+      e.cause?.details ||
+      e.cause?.message ||
+      e.message;
+
+    if (typeof message === "string" && message.trim()) {
+      return message;
+    }
+
+    try {
+      return JSON.stringify(error, (_key, value) =>
+        typeof value === "bigint" ? value.toString() : value
+      );
+    } catch {
+      return Object.prototype.toString.call(error);
+    }
+  }
+
+  return String(error);
+}
+
 function friendlyError(e: unknown): string {
   console.error('[Raw Error Diagnostics]', e);
 
-  if (e instanceof Error) {
+  if (e instanceof Error || (e && typeof e === 'object')) {
     const err = e as any;
     const msg = err.message || '';
 
@@ -64,13 +101,10 @@ function friendlyError(e: unknown): string {
     if (msg.includes('already completed')) return 'This verification request has already been processed.';
     if (msg.includes('not found')) return 'Verification request not found. Check the request ID.';
     if (msg.includes('CONTRACT_ADDRESS')) return 'Contract address not configured.';
-
-    const realMsg = err.shortMessage || err.details || err.cause?.message || err.message || String(e);
-    return realMsg.length > 200 ? realMsg.slice(0, 200) + '...' : realMsg;
   }
 
-  const msgStr = String(e);
-  return msgStr.length > 200 ? msgStr.slice(0, 200) + '...' : msgStr;
+  const realMsg = extractErrorMessage(e);
+  return realMsg.length > 200 ? realMsg.slice(0, 200) + '...' : realMsg;
 }
 
 async function sendRead<T>(fnName: string, args: unknown[]): Promise<T> {
@@ -107,15 +141,32 @@ export function useCredChain() {
     const eth = (window as any).ethereum;
     if (!eth) throw new Error('Please connect your wallet first');
 
-    // 1. Validate the connected chain and switch/add GenLayer Studionet network
+    // 1. Read the current chain ID before every write transaction
     let currentChainId: string;
     try {
       currentChainId = await eth.request({ method: 'eth_chainId' });
-    } catch (e) {
-      throw new Error(`Failed to query chain ID: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+    } catch (e: any) {
+      console.error("CredChain transaction failure at eth_chainId", {
+        error: e,
+        name: e?.name,
+        message: e?.message,
+        shortMessage: e?.shortMessage,
+        details: e?.details,
+        cause: e?.cause,
+        code: e?.code,
+        data: e?.data,
+        stack: e?.stack,
+      });
+      throw e;
     }
 
-    if (currentChainId !== '0xF23F' && currentChainId !== '0xf23f') {
+    console.log('[Diagnostic] Chain ID before switching/validation:', currentChainId);
+
+    const isTargetChain = currentChainId === '0xF23F' || currentChainId === '0xf23f';
+    console.log('[Diagnostic] Is switch required?', !isTargetChain);
+
+    // 2. Switch/add network only if not already on GenLayer Studionet
+    if (!isTargetChain) {
       try {
         await eth.request({
           method: 'wallet_switchEthereumChain',
@@ -123,28 +174,59 @@ export function useCredChain() {
         });
         currentChainId = '0xF23F';
       } catch (switchErr: any) {
+        console.error("CredChain transaction failure at wallet_switchEthereumChain", {
+          error: switchErr,
+          name: switchErr?.name,
+          message: switchErr?.message,
+          shortMessage: switchErr?.shortMessage,
+          details: switchErr?.details,
+          cause: switchErr?.cause,
+          code: switchErr?.code,
+          data: switchErr?.data,
+          stack: switchErr?.stack,
+        });
+
+        // 4902 indicates that the chain has not been added to MetaMask
         if (switchErr.code === 4902) {
           try {
             await eth.request({
               method: 'wallet_addEthereumChain',
-              params: [{
-                chainId: '0xF23F',
-                chainName: 'GenLayer Studionet',
-                nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
-                rpcUrls: ['https://studio.genlayer.com/api'],
-              }],
+              params: [STUDIONET_CHAIN],
             });
             currentChainId = '0xF23F';
           } catch (addErr: any) {
-            throw new Error(`Failed to add GenLayer Studionet network: ${addErr.message || addErr}`, { cause: addErr });
+            console.error("CredChain transaction failure at wallet_addEthereumChain", {
+              error: addErr,
+              name: addErr?.name,
+              message: addErr?.message,
+              shortMessage: addErr?.shortMessage,
+              details: addErr?.details,
+              cause: addErr?.cause,
+              code: addErr?.code,
+              data: addErr?.data,
+              stack: addErr?.stack,
+            });
+            throw addErr;
           }
         } else {
-          throw new Error(`Failed to switch to GenLayer Studionet network: ${switchErr.message || switchErr}`, { cause: switchErr });
+          throw switchErr;
         }
+      }
+
+      // Verify chain ID after switching
+      try {
+        const verifiedChainId = await eth.request({ method: 'eth_chainId' });
+        console.log('[Diagnostic] Chain ID after switching:', verifiedChainId);
+        if (verifiedChainId !== '0xF23F' && verifiedChainId !== '0xf23f') {
+          throw new Error(`Chain switch was not successful. Current chain: ${verifiedChainId}`);
+        }
+      } catch (e: any) {
+        console.error("CredChain chain verification failure", e);
+        throw e;
       }
     }
 
-    // 2. Obtain active wallet address
+    // 3. Obtain active wallet address
     let accounts: string[];
     try {
       const currentAccounts = await eth.request({ method: 'eth_accounts' }) as string[];
@@ -153,8 +235,19 @@ export function useCredChain() {
       } else {
         accounts = await eth.request({ method: 'eth_requestAccounts' }) as string[];
       }
-    } catch (e) {
-      throw new Error('Please connect your wallet first', { cause: e });
+    } catch (e: any) {
+      console.error("CredChain transaction failure at eth_requestAccounts", {
+        error: e,
+        name: e?.name,
+        message: e?.message,
+        shortMessage: e?.shortMessage,
+        details: e?.details,
+        cause: e?.cause,
+        code: e?.code,
+        data: e?.data,
+        stack: e?.stack,
+      });
+      throw e;
     }
 
     if (!accounts || accounts.length === 0) {
@@ -166,35 +259,104 @@ export function useCredChain() {
       throw new Error(`Invalid active wallet address: ${String(activeAddress)}`);
     }
 
-    // 3. Print diagnostics information (NO keys or secrets)
-    console.log('[Diagnostic] Active Address:', activeAddress);
-    console.log('[Diagnostic] Current Chain ID:', currentChainId);
+    // Log active address right before createClient
+    console.log('[Diagnostic] Active wallet address before client setup:', activeAddress);
+
+    // 4. Create the write client with BOTH active account and provider
+    let writeClient: any;
+    try {
+      writeClient = createClient({
+        chain: studionet,
+        account: activeAddress,
+        provider: (window as any).ethereum,
+      });
+    } catch (e: any) {
+      console.error("CredChain transaction failure at createClient", {
+        error: e,
+        name: e?.name,
+        message: e?.message,
+        shortMessage: e?.shortMessage,
+        details: e?.details,
+        cause: e?.cause,
+        code: e?.code,
+        data: e?.data,
+        stack: e?.stack,
+      });
+      throw e;
+    }
+
+    // 5. Diagnostics details immediately before writeContract
+    console.log('[Diagnostic] Active Account:', activeAddress);
     console.log('[Diagnostic] Contract Address:', CONTRACT_ADDRESS);
     console.log('[Diagnostic] Function Name:', fnName);
-    console.log('[Diagnostic] Arguments:', args);
+    console.log('[Diagnostic] Exact Arguments:', args);
+    console.log('[Diagnostic] Target Chain ID: 0xf23f');
+    console.log('[Diagnostic] Connected Network: studionet');
 
-    // 4. Set up wallet client with officially supported provider format
-    const walletClient = createClient({
-      chain: studionet,
-      account: activeAddress,
-      provider: (window as any).ethereum,
-    });
+    // 6. Execute writeContract (DO NOT call connect("studionet"))
+    let txHashResult: any;
+    try {
+      txHashResult = await writeClient.writeContract({
+        address: CONTRACT_ADDRESS,
+        functionName: fnName,
+        args: args as any[],
+        value: 0n,
+      });
+    } catch (e: any) {
+      console.error("CredChain transaction failure at client.writeContract", {
+        error: e,
+        name: e?.name,
+        message: e?.message,
+        shortMessage: e?.shortMessage,
+        details: e?.details,
+        cause: e?.cause,
+        code: e?.code,
+        data: e?.data,
+        stack: e?.stack,
+      });
+      throw e;
+    }
 
-    await (walletClient as any).connect("studionet");
+    console.log('[Diagnostic] writeContract raw result:', txHashResult);
 
-    const txHash = await (walletClient as any).writeContract({
-      address: CONTRACT_ADDRESS,
-      functionName: fnName,
-      args: args as any[],
-      value: 0n,
-    });
+    // 7. Extract the transaction hash structure safely
+    let txHash: string;
+    if (typeof txHashResult === 'string') {
+      txHash = txHashResult;
+    } else if (txHashResult && typeof txHashResult === 'object') {
+      txHash = txHashResult.hash || txHashResult.txHash || txHashResult.transactionHash || '';
+      if (!txHash) {
+        txHash = JSON.stringify(txHashResult);
+      }
+    } else {
+      txHash = String(txHashResult);
+    }
 
-    await readClient.waitForTransactionReceipt({
-      hash: txHash as any,
-      status: 'FINALIZED' as any,
-    });
+    console.log('[Diagnostic] Extracted Tx Hash:', txHash);
+    console.log('[Diagnostic] writeContract transaction hash:', txHash);
 
-    return txHash as string;
+    // 8. Wait for transaction receipt finalization
+    try {
+      await readClient.waitForTransactionReceipt({
+        hash: txHash as any,
+        status: 'FINALIZED' as any,
+      });
+    } catch (e: any) {
+      console.error("CredChain transaction failure at waitForTransactionReceipt", {
+        error: e,
+        name: e?.name,
+        message: e?.message,
+        shortMessage: e?.shortMessage,
+        details: e?.details,
+        cause: e?.cause,
+        code: e?.code,
+        data: e?.data,
+        stack: e?.stack,
+      });
+      throw e;
+    }
+
+    return txHash;
   }, []);
 
   // ── registerCandidate ──────────────────────────────────────────────────────
@@ -203,28 +365,28 @@ export function useCredChain() {
     claimedSkills: string,
     githubUrl: string,
     portfolioUrl: string,
-  ): Promise<boolean> => {
+  ): Promise<{ success: boolean; hash?: string; error?: string }> => {
     startTx('Registering candidate on-chain...');
     try {
       const hash = await sendWrite('register_candidate', [name, claimedSkills, githubUrl, portfolioUrl]);
       succeedTx(hash, 'Candidate registered successfully!');
-      return true;
+      return { success: true, hash };
     } catch (e) {
       failTx(e);
-      return false;
+      return { success: false, error: friendlyError(e) };
     }
   }, [startTx, succeedTx, failTx, sendWrite]);
 
   // ── stakeBond ──────────────────────────────────────────────────────────────
-  const stakeBond = useCallback(async (amount: number): Promise<boolean> => {
+  const stakeBond = useCallback(async (amount: number): Promise<{ success: boolean; hash?: string; error?: string }> => {
     startTx(`Staking bond of ${amount} units...`);
     try {
       const hash = await sendWrite('stake_bond', [BigInt(amount)]);
       succeedTx(hash, `Bond of ${amount} units staked!`);
-      return true;
+      return { success: true, hash };
     } catch (e) {
       failTx(e);
-      return false;
+      return { success: false, error: friendlyError(e) };
     }
   }, [startTx, succeedTx, failTx, sendWrite]);
 

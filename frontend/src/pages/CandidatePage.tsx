@@ -43,8 +43,8 @@ export function CandidatePage() {
     portfolioUrl: string; stakeAmount: number;
   }) => {
     resetTx();
-    const registerSuccess = await registerCandidate(data.name, data.claimedSkills, data.githubUrl, data.portfolioUrl);
-    if (!registerSuccess) return;
+    const registerResult = await registerCandidate(data.name, data.claimedSkills, data.githubUrl, data.portfolioUrl);
+    if (!registerResult.success) return;
 
     await stakeBond(data.stakeAmount);
     await refreshProfile();
