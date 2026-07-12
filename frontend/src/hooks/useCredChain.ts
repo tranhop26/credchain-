@@ -161,9 +161,9 @@ export function useCredChain() {
       throw new Error('Please connect your wallet first');
     }
 
-    const activeAddress = accounts[0];
+    const activeAddress = accounts[0] as `0x${string}`;
     if (!activeAddress || !isAddress(activeAddress)) {
-      throw new Error('Please connect your wallet first');
+      throw new Error(`Invalid active wallet address: ${String(activeAddress)}`);
     }
 
     // 3. Print diagnostics information (NO keys or secrets)
@@ -176,15 +176,17 @@ export function useCredChain() {
     // 4. Set up wallet client with officially supported provider format
     const walletClient = createClient({
       chain: studionet,
-      provider: eth,
+      account: activeAddress,
+      provider: (window as any).ethereum,
     });
+
+    await (walletClient as any).connect("studionet");
 
     const txHash = await (walletClient as any).writeContract({
       address: CONTRACT_ADDRESS,
       functionName: fnName,
       args: args as any[],
-      account: activeAddress as `0x${string}`,
-      value: BigInt(0),
+      value: 0n,
     });
 
     await readClient.waitForTransactionReceipt({
