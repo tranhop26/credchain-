@@ -8,6 +8,7 @@ export function EmployerPage() {
     txState, resetTx,
     requestVerification, executeVerification,
     getCandidateProfile, getVerificationResult,
+    callerAddress,
   } = useCredChain();
 
   const [candidateAddr, setCandidateAddr] = useState('');
@@ -39,7 +40,7 @@ export function EmployerPage() {
   const handleRequestVerification = async () => {
     if (!candidateAddr) return;
     resetTx();
-    const id = await requestVerification();
+    const id = await requestVerification(candidateAddr);
     if (id !== null) {
       setRequestId(id);
       setStep(2);
@@ -146,6 +147,28 @@ export function EmployerPage() {
             <div className="card-subtitle">Creates a verification request on-chain and returns a request ID</div>
           </div>
         </div>
+
+        <div style={{ marginBottom: '1rem', fontSize: '0.875rem', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+            <span style={{ color: 'var(--text-secondary)' }}>Employer / Requester Wallet:</span>
+            <span style={{ fontFamily: 'monospace', color: 'var(--purple-400)' }}>{callerAddress || '(not connected)'}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+            <span style={{ color: 'var(--text-secondary)' }}>Selected Candidate Wallet:</span>
+            <span style={{ fontFamily: 'monospace', color: 'var(--cyan-400)' }}>{candidateAddr || '(none)'}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+            <span style={{ color: 'var(--text-secondary)' }}>Transaction Status:</span>
+            <span style={{ color: txState.status === 'error' ? 'var(--red-400)' : txState.status === 'success' ? 'var(--green-400)' : 'var(--text-primary)' }}>{txState.status.toUpperCase()}</span>
+          </div>
+          {requestId && (
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Resulting Request ID:</span>
+              <strong style={{ color: 'var(--green-400)' }}>{requestId}</strong>
+            </div>
+          )}
+        </div>
+
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
           <input
             id="field-candidate-address"
@@ -160,7 +183,7 @@ export function EmployerPage() {
             id="btn-request-verification"
             type="button"
             className="btn btn-primary"
-            disabled={!candidateAddr || txState.status === 'pending'}
+            disabled={!callerAddress || !candidateAddr || txState.status === 'pending'}
             onClick={handleRequestVerification}
           >
             {txState.status === 'pending' && step === 1

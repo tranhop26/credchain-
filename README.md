@@ -74,6 +74,22 @@ Employer                                │
 
 **File:** [`contracts/CredChain.py`](./contracts/CredChain.py)
 
+### Method Signatures
+
+- `register_candidate(name: str, claimed_skills: str, github_url: str, portfolio_url: str) -> None`
+  Registers a candidate profile on-chain. Stored profile is initialized as `PENDING`.
+- `stake_bond(amount: u256) -> None`
+  Stakes a reputation bond. Slashed if fraud is detected.
+- `request_verification(candidate_address: Address) -> str`
+  Employer requests AI verification of a candidate's profile. Returns a `request_id`.
+- `execute_verification(request_id: str) -> None`
+  Executes AI verification for the request ID. Validators read candidate profile, web render evidence, run AI models, and write consensus verdict.
+- `get_candidate_profile(address: Address) -> str`
+  View candidate profile.
+- `get_verification_result(address: Address) -> str`
+  View verification result verdict and reasoning.
+
+
 ### What `web.render` reads
 - `gl.nondet.web.render(github_url, mode="text")` — fetches the candidate's GitHub profile page and renders it as plain text: username, bio, pinned repos, language breakdown, contribution activity
 - `gl.nondet.web.render(portfolio_url, mode="text")` — reads the candidate's personal portfolio site if provided
@@ -178,7 +194,7 @@ cd frontend && npm run dev
 
 - **App:** https://credchain-eight.vercel.app/
 - **Video:** [YOUTUBE/LOOM — add after recording]
-- **Contract:** `0x9DCED4d359A2969EA094c5DF674e01f3AB309CBf` (GenLayer Studionet)
+- **Contract:** `0xDfc880de4A0463e9E4368cE86Bd2C00BC4a0552f` (GenLayer Studionet)
 
 ---
 

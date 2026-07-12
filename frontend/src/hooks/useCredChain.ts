@@ -3,7 +3,7 @@ import { studionet } from 'genlayer-js/chains';
 import { useState, useCallback } from 'react';
 import { useWallet } from '../context/WalletContext';
 
-const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0xE26D6AE536E44714Ea81a29e0A81DF7dA3bD93eA') as `0x${string}`;
+const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0xDfc880de4A0463e9E4368cE86Bd2C00BC4a0552f') as `0x${string}`;
 
 if (!import.meta.env.VITE_CONTRACT_ADDRESS) {
   console.warn('VITE_CONTRACT_ADDRESS is not configured');
@@ -139,10 +139,19 @@ export function useCredChain() {
   }, [startTx, succeedTx, failTx, sendWrite]);
 
   // ── requestVerification ───────────────────────────────────────────────────
-  const requestVerification = useCallback(async (): Promise<string | null> => {
-    startTx('Requesting AI verification of your profile...');
+  const requestVerification = useCallback(async (candidateAddress: string): Promise<string | null> => {
+    const trimmedAddr = candidateAddress.trim();
+    if (!trimmedAddr) {
+      failTx(new Error('Candidate address cannot be empty'));
+      return null;
+    }
+    if (!trimmedAddr.startsWith('0x') || trimmedAddr.length !== 42) {
+      failTx(new Error('Invalid candidate address format (must be a valid 0x hex address)'));
+      return null;
+    }
+    startTx('Requesting AI verification of the candidate profile...');
     try {
-      const hash = await sendWrite('request_verification', []);
+      const hash = await sendWrite('request_verification', [trimmedAddr]);
       const counter = await sendRead<bigint>('get_request_counter', []);
       const requestId = String(Number(counter) - 1);
       succeedTx(hash, `Verification requested! Request ID: ${requestId}`);

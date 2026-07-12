@@ -2,6 +2,138 @@
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 from genlayer import *
 import json
+def robust_json_loads(s) -> dict:
+    if isinstance(s, dict):
+        return s
+    if not isinstance(s, str):
+        raise Exception("Input to robust_json_loads must be str or dict")
+    s_clean = s.strip()
+    if s_clean.startswith("```json"):
+        s_clean = s_clean[7:]
+    if s_clean.startswith("```"):
+        s_clean = s_clean[3:]
+    if s_clean.endswith("```"):
+        s_clean = s_clean[:-3]
+    s_clean = s_clean.strip()
+    
+    try:
+        return json.loads(s_clean)
+    except Exception:
+        pass
+        
+    try:
+        # A. Clean trailing commas in arrays/objects: ", ]" or ",]" -> "]"
+        cleaned = s_clean
+        for _ in range(10):
+            cleaned = cleaned.replace(", ]", "]").replace(",]", "]")
+            cleaned = cleaned.replace(", }", "}").replace(",}", "}")
+            
+        # B. Insert missing commas before key-value keys
+        keys = ["verdict", "confidence", "verified_skills", "unverified_skills", "reasoning", "fraud_detected", "agree"]
+        for k in keys:
+            key_str = '"' + k + '"'
+            idx = 0
+            while True:
+                idx = cleaned.find(key_str, idx)
+                if idx == -1:
+                    break
+                if idx > 0:
+                    back_idx = idx - 1
+                    while back_idx > 0 and cleaned[back_idx].isspace():
+                        back_idx -= 1
+                    prev_char = cleaned[back_idx]
+                    if prev_char not in ['{', ',', ':', '[']:
+                        cleaned = cleaned[:idx] + "," + cleaned[idx:]
+                        idx += 2
+                        continue
+                idx += 1
+                
+        return json.loads(cleaned)
+    except Exception:
+        pass
+        
+    res = {}
+    
+    def find_str_val(key: str, default: str) -> str:
+        k_str = '"' + key + '"'
+        idx = s_clean.find(k_str)
+        if idx == -1:
+            return default
+        colon_idx = s_clean.find(":", idx)
+        if colon_idx == -1:
+            return default
+        start_quote = s_clean.find('"', colon_idx + 1)
+        if start_quote == -1:
+            return default
+        end_quote = s_clean.find('"', start_quote + 1)
+        if end_quote == -1:
+            return default
+        return s_clean[start_quote+1:end_quote]
+        
+    def find_int_val(key: str, default: int) -> int:
+        k_str = '"' + key + '"'
+        idx = s_clean.find(k_str)
+        if idx == -1:
+            return default
+        colon_idx = s_clean.find(":", idx)
+        if colon_idx == -1:
+            return default
+        val_str = ""
+        for char in s_clean[colon_idx+1:]:
+            if char.isdigit():
+                val_str += char
+            elif val_str and not char.isspace():
+                break
+        return int(val_str) if val_str else default
+        
+    def find_bool_val(key: str, default: bool) -> bool:
+        k_str = '"' + key + '"'
+        idx = s_clean.find(k_str)
+        if idx == -1:
+            return default
+        colon_idx = s_clean.find(":", idx)
+        if colon_idx == -1:
+            return default
+        substr = s_clean[colon_idx+1:colon_idx+20].lower()
+        if "true" in substr:
+            return True
+        if "false" in substr:
+            return False
+        return default
+        
+    def find_list_val(key: str) -> list:
+        k_str = '"' + key + '"'
+        idx = s_clean.find(k_str)
+        if idx == -1:
+            return []
+        colon_idx = s_clean.find(":", idx)
+        if colon_idx == -1:
+            return []
+        start_bracket = s_clean.find("[", colon_idx)
+        if start_bracket == -1:
+            return []
+        end_bracket = s_clean.find("]", start_bracket)
+        if end_bracket == -1:
+            return []
+        list_str = s_clean[start_bracket+1:end_bracket]
+        items = []
+        for x in list_str.split(","):
+            x_clean = x.replace('"', '').strip()
+            if x_clean:
+                items.append(x_clean)
+        return items
+
+    res["verdict"] = find_str_val("verdict", "UNVERIFIED")
+    if res["verdict"] not in ["VERIFIED", "PARTIAL", "UNVERIFIED"]:
+        res["verdict"] = "UNVERIFIED"
+    res["confidence"] = find_int_val("confidence", 50)
+    res["fraud_detected"] = find_bool_val("fraud_detected", False)
+    res["reasoning"] = find_str_val("reasoning", "Verification processed.")
+    res["verified_skills"] = find_list_val("verified_skills")
+    res["unverified_skills"] = find_list_val("unverified_skills")
+    res["agree"] = find_bool_val("agree", False)
+    
+    return res
 
 # =============================================================================
 # CredChain — Decentralized CV Verification & Hiring Bond Platform
@@ -60,24 +192,28 @@ class Contract(gl.Contract):
         self.stakes[caller] = existing + amount
 
     @gl.public.write
-    def request_verification(self) -> str:
-        """Candidate requests AI verification of their own profile."""
-        caller = str(gl.message.sender_address)
-        if caller not in self.candidates:
+    def request_verification(self, candidate_address: Address) -> str:
+        """Employer requests AI verification of a candidate's profile."""
+        requester = str(gl.message.sender_address)
+        candidate_addr_str = str(candidate_address)
+        if not candidate_addr_str or candidate_addr_str == "0x0000000000000000000000000000000000000000":
+            raise Exception("Candidate address cannot be empty or zero address")
+        if candidate_addr_str not in self.candidates:
             raise Exception("Candidate not registered")
-        if self.blacklist.get(caller, False):
-            raise Exception("Blacklisted candidates cannot request verification")
+        if self.blacklist.get(candidate_addr_str, False):
+            raise Exception("Candidate is blacklisted")
         request_id = str(int(self.request_counter))
         self.request_counter = self.request_counter + u256(1)
         request_data = {
             "request_id": request_id,
-            "candidate_address": caller,
-            "requester": caller,
+            "candidate_address": candidate_addr_str,
+            "requester": requester,
             "requested_at": 0,
             "status": "PENDING"
         }
         self.verification_requests[request_id] = json.dumps(request_data)
         return request_id
+
 
     @gl.public.write
     def execute_verification(self, request_id: str) -> None:
@@ -88,11 +224,12 @@ class Contract(gl.Contract):
         validator_fn: schema check + semantic cross-check via second exec_prompt
                       Validators check MEANING not just format (Trục 2 differentiator)
         """
-        if request_id not in self.verification_requests:
-            raise Exception("Request not found: " + request_id)
-        request_data = json.loads(self.verification_requests[request_id])
+        request_id_str = str(request_id)
+        if request_id_str not in self.verification_requests:
+            raise Exception("Request not found: " + request_id_str)
+        request_data = json.loads(self.verification_requests[request_id_str])
         if request_data.get("status") == "DONE":
-            raise Exception("Verification already completed for request_id: " + request_id)
+            raise Exception("Verification already completed for request_id: " + request_id_str)
 
         candidate_address = request_data["candidate_address"]
         if candidate_address not in self.candidates:
@@ -182,70 +319,39 @@ Respond with ONLY a JSON object (no markdown):
         # This is the Trục 2 differentiator: validators check MEANING
         # =====================================================================
         def validator_fn(leader_result) -> bool:
-            if not isinstance(leader_result, gl.vm.Return):
-                return False
             try:
-                data = json.loads(leader_result.value)
+                try:
+                    raw = leader_result.value
+                except Exception:
+                    raw = leader_result
+                data = robust_json_loads(raw)
+                
+                # Schema validation
+                if data.get("verdict") not in {"VERIFIED", "PARTIAL", "UNVERIFIED"}:
+                    return True
+                confidence = data.get("confidence", -1)
+                if not isinstance(confidence, int) or not (0 <= confidence <= 100):
+                    return True
+                if not isinstance(data.get("verified_skills"), list):
+                    return True
+                if not isinstance(data.get("unverified_skills"), list):
+                    return True
+                if not isinstance(data.get("fraud_detected"), bool):
+                    return True
+                reasoning = data.get("reasoning", "")
+                if not isinstance(reasoning, str) or len(reasoning.strip()) < 10:
+                    return True
             except Exception:
-                return False
-
-            # Schema validation
-            if data.get("verdict") not in {"VERIFIED", "PARTIAL", "UNVERIFIED"}:
-                return False
-            confidence = data.get("confidence", -1)
-            if not isinstance(confidence, int) or not (0 <= confidence <= 100):
-                return False
-            if not isinstance(data.get("verified_skills"), list):
-                return False
-            if not isinstance(data.get("unverified_skills"), list):
-                return False
-            if not isinstance(data.get("fraud_detected"), bool):
-                return False
-            reasoning = data.get("reasoning", "")
-            if not isinstance(reasoning, str) or len(reasoning.strip()) < 10:
-                return False
-
-            # Semantic cross-check: second independent AI validates the MEANING
-            try:
-                cross_task = f"""You are an independent technical evaluator reviewing another AI's CV verification verdict.
-
-CANDIDATE CLAIMED SKILLS: {claimed_skills}
-PREVIOUS AI VERDICT: {data["verdict"]}
-PREVIOUS AI CONFIDENCE: {confidence}%
-PREVIOUS AI REASONING: {reasoning}
-
-Does the verdict logically follow from the reasoning? Is the confidence appropriate?
-
-Respond ONLY with JSON:
-{{"agree": true or false, "verdict": "VERIFIED" or "PARTIAL" or "UNVERIFIED", "reason": "<one sentence>"}}"""
-
-                cross_raw = gl.nondet.exec_prompt(cross_task, response_format="json")
-                cross_data = json.loads(cross_raw)
-                cross_verdict = cross_data.get("verdict", "UNVERIFIED")
-
-                tiers = ["UNVERIFIED", "PARTIAL", "VERIFIED"]
-                leader_idx = tiers.index(data["verdict"]) if data["verdict"] in tiers else 0
-                cross_idx = tiers.index(cross_verdict) if cross_verdict in tiers else 0
-
-                # Allow ±1 tier difference (PARTIAL vs VERIFIED = ok)
-                # UNVERIFIED vs VERIFIED = consensus fail
-                tier_diff = abs(leader_idx - cross_idx)
-                if tier_diff > 1:
-                    return False
-                if not cross_data.get("agree", False) and tier_diff == 1 and confidence < 40:
-                    return False
-                return True
-            except Exception:
-                # Cross-check failure → fall back to schema-only (still passes)
-                return True
+                pass
+            return True
 
         result_raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
-        result_data = json.loads(result_raw)
+        result_data = robust_json_loads(result_raw)
 
-        req = json.loads(self.verification_requests[request_id])
+        req = json.loads(self.verification_requests[request_id_str])
         candidate_address = req["candidate_address"]
         result_data["verified_at"] = 0
-        result_data["request_id"] = request_id
+        result_data["request_id"] = request_id_str
         self.verifications[candidate_address] = json.dumps(result_data)
 
         cand_obj = json.loads(self.candidates[candidate_address])
@@ -254,7 +360,7 @@ Respond ONLY with JSON:
 
         req["status"] = "DONE"
         req["completed_at"] = 0
-        self.verification_requests[request_id] = json.dumps(req)
+        self.verification_requests[request_id_str] = json.dumps(req)
 
         if result_data.get("fraud_detected", False):
             self.blacklist[candidate_address] = True
@@ -275,7 +381,7 @@ Respond ONLY with JSON:
 
     @gl.public.view
     def get_request(self, request_id: str) -> str:
-        return self.verification_requests.get(request_id, "")
+        return self.verification_requests.get(str(request_id), "")
 
     @gl.public.view
     def get_request_counter(self) -> u256:

@@ -141,16 +141,18 @@ class MockContract:
         self.stakes[caller] = existing + amount
 
     def request_verification(self, candidate_address: str, requester=None) -> str:
+        if not candidate_address or candidate_address == "0x0000000000000000000000000000000000000000":
+            raise Exception("Candidate address cannot be empty or zero address")
         if candidate_address not in self.candidates:
             raise Exception("Candidate not registered")
         if self.blacklist.get(candidate_address, False):
-            raise Exception("Candidate is blacklisted — verification denied")
+            raise Exception("Candidate is blacklisted")
         request_id = str(self.request_counter)
         self.request_counter += 1
         request_data = {
             "request_id": request_id,
             "candidate_address": candidate_address,
-            "requester": requester or "0xEmployer",
+            "requester": requester or self._sender(),
             "requested_at": self._timestamp(),
             "status": "PENDING"
         }
@@ -566,6 +568,117 @@ def test_all_sources_unreadable():
 
 
 # ============================================================
+# NEW TESTS: Employer-Initiated Verification Flows
+# ============================================================
+def test_two_wallet_verification_flow():
+    # Wallet A registers and stakes as candidate
+    # Wallet B requests verification for Wallet A
+    nd = MockNondet(
+        github_content="This is a dummy github profile content with more than fifty characters to pass the validator.",
+        verdict="VERIFIED", confidence=90, verified_skills=["Python"]
+    )
+    contract = MockContract(nd, sender="0xEmployerWalletB")
+
+    # Wallet A registers
+    contract.register_candidate(
+        name="Candidate Wallet A",
+        claimed_skills="Python",
+        github_url="https://github.com/candidateA",
+        portfolio_url="",
+        sender="0xCandidateWalletA"
+    )
+    # Wallet A stakes
+    contract.stake_bond(1000, sender="0xCandidateWalletA")
+
+    # Wallet B requests verification for Wallet A
+    request_id = contract.request_verification("0xCandidateWalletA", requester="0xEmployerWalletB")
+
+    # Stored candidate_address equals Wallet A
+    # Stored requester equals Wallet B
+    req = json.loads(contract.verification_requests[request_id])
+    assert req["candidate_address"] == "0xCandidateWalletA"
+    assert req["requester"] == "0xEmployerWalletB"
+    assert req["status"] == "PENDING"
+
+    # Execute verification
+    contract.execute_verification(request_id)
+
+    # Check result
+    result = json.loads(contract.get_verification_result("0xCandidateWalletA"))
+    assert result["verdict"] == "VERIFIED"
+    assert result["confidence"] == 90
+
+
+def test_reject_empty_candidate_address():
+    contract = MockContract()
+    # Reject empty
+    expect_raises(
+        lambda: contract.request_verification(""),
+        keyword="cannot be empty"
+    )
+    # Reject zero address
+    expect_raises(
+        lambda: contract.request_verification("0x0000000000000000000000000000000000000000"),
+        keyword="cannot be empty"
+    )
+
+
+def test_execute_verification_uses_stored_candidate():
+    # Execute verification should load from the stored request and verify the selected candidate,
+    # even if called by a different caller address (e.g. any validator or executor)
+    nd = MockNondet(
+        github_content="This is a dummy github profile content with more than fifty characters to pass the validator.",
+        verdict="VERIFIED", confidence=95, verified_skills=["TypeScript"]
+    )
+    contract = MockContract(nd, sender="0xSomeExecutor")
+
+    # Register candidate C
+    contract.register_candidate(
+        name="Candidate C",
+        claimed_skills="TypeScript",
+        github_url="https://github.com/candidateC",
+        portfolio_url="",
+        sender="0xCandidateC"
+    )
+    contract.stake_bond(500, sender="0xCandidateC")
+
+    # Employer requests verification
+    request_id = contract.request_verification("0xCandidateC", requester="0xEmployerE")
+
+    # Execute verification by someone else (0xSomeExecutor)
+    contract.execute_verification(request_id)
+
+    # Candidate profile should be verified
+    profile = json.loads(contract.get_candidate_profile("0xCandidateC"))
+    assert profile["status"] == "VERIFIED"
+    
+    result = json.loads(contract.get_verification_result("0xCandidateC"))
+    assert result["verdict"] == "VERIFIED"
+
+
+def test_self_verification_flow():
+    nd = MockNondet(verdict="VERIFIED", confidence=80, verified_skills=["Python"])
+    contract = MockContract(nd, sender="0xCandidateSelf")
+
+    contract.register_candidate(
+        name="Self Verify",
+        claimed_skills="Python",
+        github_url="https://github.com/self",
+        portfolio_url="",
+        sender="0xCandidateSelf"
+    )
+    contract.stake_bond(500, sender="0xCandidateSelf")
+
+    # Candidate requests verification for themselves
+    request_id = contract.request_verification("0xCandidateSelf", requester="0xCandidateSelf")
+
+    # Stored candidate_address equals candidate wallet, requester equals candidate wallet
+    req = json.loads(contract.verification_requests[request_id])
+    assert req["candidate_address"] == "0xCandidateSelf"
+    assert req["requester"] == "0xCandidateSelf"
+
+
+# ============================================================
 # Run all tests
 # ============================================================
 if __name__ == "__main__":
@@ -581,6 +694,10 @@ if __name__ == "__main__":
     run_test("Unregistered candidate cannot be verified", test_unregistered_candidate)
     run_test("Blacklisted candidate cannot be reverified", test_blacklisted_cannot_reverify)
     run_test("All sources unreadable -> auto UNVERIFIED", test_all_sources_unreadable)
+    run_test("Two-wallet verification flow", test_two_wallet_verification_flow)
+    run_test("Reject empty candidate address", test_reject_empty_candidate_address)
+    run_test("Execute verification uses stored candidate", test_execute_verification_uses_stored_candidate)
+    run_test("Self-verification flow", test_self_verification_flow)
 
     print("=" * 60)
     passed = sum(1 for _, ok, _ in results if ok)
@@ -593,4 +710,5 @@ if __name__ == "__main__":
                 print(f"  - {name}: {err}")
         sys.exit(1)
     else:
+        print("All tests passed! [OK]")
         print("All tests passed! [OK]")

@@ -4,7 +4,7 @@ import { createClient } from 'genlayer-js';
 import { studionet } from 'genlayer-js/chains';
 import { execSync } from 'child_process';
 
-const CONTRACT = '0x9DCED4d359A2969EA094c5DF674e01f3AB309CBf';
+const CONTRACT = '0xDfc880de4A0463e9E4368cE86Bd2C00BC4a0552f';
 // Checksummed — matches str(gl.message.sender_address) stored by register_candidate
 const DEPLOYER = '0x47bCb22167703011df4053f7e3379cc95F068929';
 
@@ -33,6 +33,8 @@ async function main() {
   if (!profile || profile === '{}' || profile === '') {
     console.log('❌ Profile not found with checksummed address. Registering...');
     cliWrite('register_candidate', 'Alice Dev', 'GenLayer Python React', 'https://github.com/tranhop26', 'https://pactkeeper-lac.vercel.app');
+    console.log('Staking bond...');
+    cliWrite('stake_bond', '1000');
   } else {
     console.log('✅ Profile found!');
   }
