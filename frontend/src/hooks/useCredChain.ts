@@ -107,13 +107,25 @@ function friendlyError(e: unknown): string {
   return realMsg.length > 200 ? realMsg.slice(0, 200) + '...' : realMsg;
 }
 
-async function sendRead<T>(fnName: string, args: unknown[]): Promise<T> {
-  const result = await readClient.readContract({
-    address: CONTRACT_ADDRESS,
-    functionName: fnName,
-    args: args as any[],
-  });
-  return result as T;
+async function sendRead<T>(fnName: string, args: unknown[], retries = 3, delayMs = 1500): Promise<T> {
+  let lastError: any;
+  for (let i = 0; i < retries; i++) {
+    try {
+      const result = await readClient.readContract({
+        address: CONTRACT_ADDRESS,
+        functionName: fnName,
+        args: args as any[],
+      });
+      return result as T;
+    } catch (e: any) {
+      lastError = e;
+      console.warn(`[sendRead] Try ${i + 1} failed for ${fnName}. Retrying in ${delayMs}ms...`, e);
+      if (i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  throw lastError;
 }
 
 export function useCredChain() {
@@ -437,32 +449,83 @@ export function useCredChain() {
   // ── Getters ────────────────────────────────────────────────────────────────
   const getCandidateProfile = useCallback(async (addr: string): Promise<CandidateProfile | null> => {
     if (!addr || !isAddress(addr)) return null;
+    const cleanAddr = addr.toLowerCase().trim();
+    console.log('[Diagnostic] getCandidateProfile call:', {
+      contractAddress: CONTRACT_ADDRESS,
+      methodName: 'get_candidate_profile',
+      arguments: [cleanAddr],
+      rpcEndpoint: 'https://studio.genlayer.com/api',
+      chainId: '61999 (0xf23f)'
+    });
     try {
-      const raw = await sendRead<string>('get_candidate_profile', [addr]);
-      return parseJson<CandidateProfile>(raw);
-    } catch { return null; }
+      const raw = await sendRead<string>('get_candidate_profile', [cleanAddr]);
+      console.log('[Diagnostic] getCandidateProfile raw result:', raw);
+      if (!raw || raw === '') return null;
+      const parsed = parseJson<CandidateProfile>(raw);
+      console.log('[Diagnostic] getCandidateProfile parsed result:', parsed);
+      if (!parsed) {
+        throw new Error(`Malformed JSON response for candidate profile: ${raw}`);
+      }
+      return parsed;
+    } catch (e: any) {
+      console.error('[Diagnostic] getCandidateProfile error details:', {
+        error: e,
+        message: e?.message,
+        shortMessage: e?.shortMessage,
+        details: e?.details,
+        stack: e?.stack,
+      });
+      throw e;
+    }
   }, []);
 
   const getVerificationResult = useCallback(async (addr: string): Promise<VerificationResult | null> => {
     if (!addr || !isAddress(addr)) return null;
+    const cleanAddr = addr.toLowerCase().trim();
+    console.log('[Diagnostic] getVerificationResult call:', {
+      contractAddress: CONTRACT_ADDRESS,
+      methodName: 'get_verification_result',
+      arguments: [cleanAddr],
+      rpcEndpoint: 'https://studio.genlayer.com/api',
+      chainId: '61999 (0xf23f)'
+    });
     try {
-      const raw = await sendRead<string>('get_verification_result', [addr]);
-      return parseJson<VerificationResult>(raw);
-    } catch { return null; }
+      const raw = await sendRead<string>('get_verification_result', [cleanAddr]);
+      console.log('[Diagnostic] getVerificationResult raw result:', raw);
+      if (!raw || raw === '') return null;
+      const parsed = parseJson<VerificationResult>(raw);
+      console.log('[Diagnostic] getVerificationResult parsed result:', parsed);
+      return parsed;
+    } catch (e: any) {
+      console.error('[Diagnostic] getVerificationResult error details:', e);
+      throw e;
+    }
   }, []);
 
   const isBlacklisted = useCallback(async (addr: string): Promise<boolean> => {
     if (!addr || !isAddress(addr)) return false;
-    try { return await sendRead<boolean>('is_blacklisted', [addr]); }
-    catch { return false; }
+    const cleanAddr = addr.toLowerCase().trim();
+    try {
+      const res = await sendRead<boolean>('is_blacklisted', [cleanAddr]);
+      console.log('[Diagnostic] isBlacklisted result:', res);
+      return res;
+    } catch (e) {
+      console.error('[Diagnostic] isBlacklisted error:', e);
+      throw e;
+    }
   }, []);
 
   const getStake = useCallback(async (addr: string): Promise<number> => {
     if (!addr || !isAddress(addr)) return 0;
+    const cleanAddr = addr.toLowerCase().trim();
     try {
-      const raw = await sendRead<bigint>('get_stake', [addr]);
+      const raw = await sendRead<bigint>('get_stake', [cleanAddr]);
+      console.log('[Diagnostic] getStake result:', raw);
       return Number(raw);
-    } catch { return 0; }
+    } catch (e) {
+      console.error('[Diagnostic] getStake error:', e);
+      throw e;
+    }
   }, []);
 
   return {

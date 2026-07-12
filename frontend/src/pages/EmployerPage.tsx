@@ -22,11 +22,13 @@ export function EmployerPage() {
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const [lookupAddr, setLookupAddr] = useState('');
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [errorState, setErrorState] = useState<string | null>(null);
 
   const handleLookup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!lookupAddr.trim()) return;
     setIsLoadingProfile(true);
+    setErrorState(null);
     try {
       const [p, r] = await Promise.all([
         getCandidateProfile(lookupAddr.trim()),
@@ -34,7 +36,15 @@ export function EmployerPage() {
       ]);
       setCandidateProfile(p);
       setVerificationResult(r);
-      if (p) setCandidateAddr(lookupAddr.trim());
+      if (p) {
+        setCandidateAddr(lookupAddr.trim());
+      } else {
+        setErrorState('Candidate genuinely not registered.');
+      }
+    } catch (err: any) {
+      console.error('[EmployerPage] handleLookup error:', err);
+      const msg = err.message || err.details || String(err);
+      setErrorState(msg);
     } finally {
       setIsLoadingProfile(false);
     }
@@ -82,6 +92,13 @@ export function EmployerPage() {
         <div className="error-alert fade-in" style={{ marginBottom: '1.5rem' }}>
           <span style={{ flexShrink: 0 }}>⚠</span>
           <span>{walletError}</span>
+        </div>
+      )}
+
+      {errorState && (
+        <div className="error-alert fade-in" style={{ marginBottom: '1.5rem' }}>
+          <span style={{ flexShrink: 0 }}>⚠</span>
+          <span>Read/Sync Error: {errorState}</span>
         </div>
       )}
 

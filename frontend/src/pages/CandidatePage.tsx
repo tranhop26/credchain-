@@ -21,10 +21,12 @@ export function CandidatePage() {
   const [stakeAmount, setStakeAmount] = useState<number>(0);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const [activeTab, setActiveTab] = useState<'register' | 'status'>('register');
+  const [errorState, setErrorState] = useState<string | null>(null);
 
   const refreshProfile = useCallback(async () => {
     if (!callerAddress) return;
     setIsLoadingProfile(true);
+    setErrorState(null);
     try {
       const p = await getCandidateProfile(callerAddress);
       setProfile(p);
@@ -37,6 +39,10 @@ export function CandidatePage() {
         setStakeAmount(s);
         setActiveTab('status');
       }
+    } catch (err: any) {
+      console.error('[CandidatePage] refreshProfile error:', err);
+      const msg = err.message || err.details || String(err);
+      setErrorState(msg);
     } finally {
       setIsLoadingProfile(false);
     }
@@ -123,6 +129,13 @@ export function CandidatePage() {
         <div className="error-alert fade-in" style={{ marginBottom: '1.5rem' }}>
           <span style={{ flexShrink: 0 }}>⚠</span>
           <span>{walletError}</span>
+        </div>
+      )}
+
+      {errorState && (
+        <div className="error-alert fade-in" style={{ marginBottom: '1.5rem' }}>
+          <span style={{ flexShrink: 0 }}>⚠</span>
+          <span>Read/Sync Error: {errorState}</span>
         </div>
       )}
 
