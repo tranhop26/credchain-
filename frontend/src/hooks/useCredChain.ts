@@ -2,6 +2,7 @@ import { createClient } from 'genlayer-js';
 import { studionet } from 'genlayer-js/chains';
 import { useState, useCallback } from 'react';
 import { useWallet } from '../context/WalletContext';
+import { isAddress } from 'viem';
 
 const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0xDfc880de4A0463e9E4368cE86Bd2C00BC4a0552f') as `0x${string}`;
 
@@ -54,7 +55,17 @@ function friendlyError(e: unknown): string {
   if (msg.includes('already completed')) return 'This verification request has already been processed.';
   if (msg.includes('not found')) return 'Verification request not found. Check the request ID.';
   if (msg.includes('CONTRACT_ADDRESS')) return 'Contract address not configured.';
-  if (msg.includes('wallet') || msg.includes('MetaMask')) return 'Please connect your MetaMask wallet first.';
+  if (
+    msg.includes('wallet') || 
+    msg.includes('MetaMask') || 
+    msg.includes('undefined') || 
+    msg.includes('invalid') || 
+    msg.includes('Address') || 
+    msg.includes('account') || 
+    msg.includes('connect')
+  ) {
+    return 'Please connect your wallet first';
+  }
   return msg.length > 200 ? msg.slice(0, 200) + '...' : msg;
 }
 
@@ -89,9 +100,29 @@ export function useCredChain() {
 
   // Write via MetaMask (window.ethereum)
   const sendWrite = useCallback(async (fnName: string, args: unknown[]): Promise<string> => {
-    if (!address) throw new Error('wallet not connected — please connect MetaMask first');
     const eth = (window as any).ethereum;
     if (!eth) throw new Error('MetaMask not found');
+
+    let accounts: string[];
+    try {
+      const currentAccounts = await eth.request({ method: 'eth_accounts' }) as string[];
+      if (currentAccounts && currentAccounts.length > 0) {
+        accounts = currentAccounts;
+      } else {
+        accounts = await eth.request({ method: 'eth_requestAccounts' }) as string[];
+      }
+    } catch (e) {
+      throw new Error('Please connect your wallet first', { cause: e });
+    }
+
+    if (!accounts || accounts.length === 0) {
+      throw new Error('Please connect your wallet first');
+    }
+
+    const activeAddress = accounts[0];
+    if (!activeAddress || !isAddress(activeAddress)) {
+      throw new Error('Please connect your wallet first');
+    }
 
     const walletClient = createClient({
       chain: studionet,
@@ -103,7 +134,7 @@ export function useCredChain() {
       address: CONTRACT_ADDRESS,
       functionName: fnName,
       args: args as any[],
-      account: address as `0x${string}`,
+      account: activeAddress as `0x${string}`,
       value: BigInt(0),
     });
 
@@ -113,7 +144,7 @@ export function useCredChain() {
     });
 
     return txHash as string;
-  }, [address]);
+  }, []);
 
   // ── registerCandidate ──────────────────────────────────────────────────────
   const registerCandidate = useCallback(async (
@@ -145,7 +176,7 @@ export function useCredChain() {
       failTx(new Error('Candidate address cannot be empty'));
       return null;
     }
-    if (!trimmedAddr.startsWith('0x') || trimmedAddr.length !== 42) {
+    if (!trimmedAddr.startsWith('0x') || trimmedAddr.length !== 42 || !isAddress(trimmedAddr)) {
       failTx(new Error('Invalid candidate address format (must be a valid 0x hex address)'));
       return null;
     }
@@ -170,6 +201,7 @@ export function useCredChain() {
 
   // ── Getters ────────────────────────────────────────────────────────────────
   const getCandidateProfile = useCallback(async (addr: string): Promise<CandidateProfile | null> => {
+    if (!addr || !isAddress(addr)) return null;
     try {
       const raw = await sendRead<string>('get_candidate_profile', [addr]);
       return parseJson<CandidateProfile>(raw);
@@ -177,6 +209,7 @@ export function useCredChain() {
   }, []);
 
   const getVerificationResult = useCallback(async (addr: string): Promise<VerificationResult | null> => {
+    if (!addr || !isAddress(addr)) return null;
     try {
       const raw = await sendRead<string>('get_verification_result', [addr]);
       return parseJson<VerificationResult>(raw);
@@ -184,11 +217,13 @@ export function useCredChain() {
   }, []);
 
   const isBlacklisted = useCallback(async (addr: string): Promise<boolean> => {
+    if (!addr || !isAddress(addr)) return false;
     try { return await sendRead<boolean>('is_blacklisted', [addr]); }
     catch { return false; }
   }, []);
 
   const getStake = useCallback(async (addr: string): Promise<number> => {
+    if (!addr || !isAddress(addr)) return 0;
     try {
       const raw = await sendRead<bigint>('get_stake', [addr]);
       return Number(raw);

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useWallet } from '../context/WalletContext';
 
 interface CandidateFormProps {
   onSubmit: (data: {
@@ -12,6 +13,7 @@ interface CandidateFormProps {
 }
 
 export function CandidateForm({ onSubmit, isLoading }: CandidateFormProps) {
+  const { isConnected } = useWallet();
   const [name, setName] = useState('');
   const [skills, setSkills] = useState('');
   const [github, setGithub] = useState('');
@@ -103,7 +105,7 @@ export function CandidateForm({ onSubmit, isLoading }: CandidateFormProps) {
         id="btn-register-stake"
         type="submit"
         className="btn btn-primary btn-full"
-        disabled={isLoading}
+        disabled={isLoading || !isConnected}
         style={{ marginTop: '0.5rem' }}
       >
         {isLoading ? (
@@ -111,6 +113,8 @@ export function CandidateForm({ onSubmit, isLoading }: CandidateFormProps) {
             <span className="tx-spinner" style={{ width: 16, height: 16 }} />
             Registering on GenLayer...
           </>
+        ) : !isConnected ? (
+          'Please Connect Wallet'
         ) : (
           '⛓ Register & Stake Bond'
         )}
