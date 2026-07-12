@@ -10,44 +10,94 @@ import { useWallet } from '../context/WalletContext';
 export function CandidatePage() {
   const { error: walletError } = useWallet();
   const {
-    txState, resetTx,
+    txState, resetTx, succeedTx,
     registerCandidate, stakeBond,
-    getCandidateProfile, getVerificationResult,
+    getCandidateProfile, getVerificationResult, getStake,
     callerAddress,
   } = useCredChain();
 
   const [profile, setProfile] = useState<CandidateProfile | null>(null);
   const [result, setResult] = useState<VerificationResult | null>(null);
+  const [stakeAmount, setStakeAmount] = useState<number>(0);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const [activeTab, setActiveTab] = useState<'register' | 'status'>('register');
 
   const refreshProfile = useCallback(async () => {
+    if (!callerAddress) return;
     setIsLoadingProfile(true);
     try {
-      const [p, r] = await Promise.all([
-        getCandidateProfile(callerAddress),
-        getVerificationResult(callerAddress),
-      ]);
+      const p = await getCandidateProfile(callerAddress);
       setProfile(p);
-      setResult(r);
-      if (p) setActiveTab('status');
+      if (p) {
+        const [r, s] = await Promise.all([
+          getVerificationResult(callerAddress),
+          getStake(callerAddress),
+        ]);
+        setResult(r);
+        setStakeAmount(s);
+        setActiveTab('status');
+      }
     } finally {
       setIsLoadingProfile(false);
     }
-  }, [callerAddress, getCandidateProfile, getVerificationResult]);
+  }, [callerAddress, getCandidateProfile, getVerificationResult, getStake]);
 
   useEffect(() => { refreshProfile(); }, [refreshProfile]);
+
+  const handleContinueStakingOnly = async () => {
+    resetTx();
+    const stakeResult = await stakeBond(1000);
+    if (stakeResult.success) {
+      await refreshProfile();
+      succeedTx(stakeResult.hash || '', `Bond staked successfully! Tx Hash: ${stakeResult.hash || ''}`);
+    }
+  };
 
   const handleRegisterAndStake = async (data: {
     name: string; claimedSkills: string; githubUrl: string;
     portfolioUrl: string; stakeAmount: number;
   }) => {
     resetTx();
-    const registerResult = await registerCandidate(data.name, data.claimedSkills, data.githubUrl, data.portfolioUrl);
-    if (!registerResult.success) return;
 
-    await stakeBond(data.stakeAmount);
+    let registerSuccess = false;
+    let registerHash = '';
+
+    // 1. Prevent duplicate registration: check getCandidateProfile
+    if (callerAddress) {
+      const existingProfile = await getCandidateProfile(callerAddress);
+      if (existingProfile && existingProfile.name) {
+        registerSuccess = true;
+        console.log('[CandidatePage] Candidate is already registered. Skipping registration.');
+      }
+    }
+
+    if (!registerSuccess) {
+      const registerResult = await registerCandidate(data.name, data.claimedSkills, data.githubUrl, data.portfolioUrl);
+      if (!registerResult.success) return;
+      registerSuccess = true;
+      registerHash = registerResult.hash || '';
+
+      // Verify candidate profile exists after register_candidate finalized successfully
+      if (callerAddress) {
+        const verifiedProfile = await getCandidateProfile(callerAddress);
+        if (!verifiedProfile || !verifiedProfile.name) {
+          console.warn('[CandidatePage] Verified profile check failed or is not updated yet.');
+        }
+      }
+    }
+
+    // 2. Submit stake_bond
+    const stakeResult = await stakeBond(data.stakeAmount);
     await refreshProfile();
+
+    // 3. Display both hashes
+    if (registerSuccess && stakeResult.success) {
+      const displayMsg = `Registration & Staking Complete!\n` +
+        (registerHash ? `Registration Tx: ${registerHash}\n` : '') +
+        `Staking Tx: ${stakeResult.hash || ''}`;
+
+      succeedTx(stakeResult.hash || registerHash || '', displayMsg);
+    }
   };
 
   const statusColor = (s?: string) => {
@@ -116,21 +166,51 @@ export function CandidatePage() {
       {/* Tab: Register */}
       {activeTab === 'register' && (
         <div className="card fade-in">
-          <div className="card-header">
-            <div className="card-icon purple">+</div>
-            <div>
-              <div className="card-title">Register as Candidate</div>
-              <div className="card-subtitle">Stakes a reputation bond alongside your skill claims</div>
+          {profile && stakeAmount === 0 ? (
+            <div style={{ textAlign: 'center', padding: '1.5rem 0' }}>
+              <div style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--yellow-400)' }}>
+                ⚠ Registration Succeeded but Staking is Missing
+              </div>
+              <p style={{ color: 'var(--slate-400)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
+                Your candidate profile was successfully registered, but your reputation bond has not been staked yet.
+                Click below to complete the staking process.
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', alignItems: 'center' }}>
+                <button
+                  id="btn-continue-staking"
+                  className="btn btn-primary"
+                  onClick={handleContinueStakingOnly}
+                  disabled={txState.status === 'pending'}
+                >
+                  {txState.status === 'pending' ? 'Staking Bond...' : 'Continue Staking Bond (1000 GEN)'}
+                </button>
+              </div>
+              <div style={{ marginTop: '1.5rem' }}>
+                <TxStatus
+                  txState={txState}
+                  consensusMsg="Staking bond on GenLayer network..."
+                />
+              </div>
             </div>
-          </div>
-          <CandidateForm
-            onSubmit={handleRegisterAndStake}
-            isLoading={txState.status === 'pending'}
-          />
-          <TxStatus
-            txState={txState}
-            consensusMsg="Registering on GenLayer network..."
-          />
+          ) : (
+            <>
+              <div className="card-header">
+                <div className="card-icon purple">+</div>
+                <div>
+                  <div className="card-title">Register as Candidate</div>
+                  <div className="card-subtitle">Stakes a reputation bond alongside your skill claims</div>
+                </div>
+              </div>
+              <CandidateForm
+                onSubmit={handleRegisterAndStake}
+                isLoading={txState.status === 'pending'}
+              />
+              <TxStatus
+                txState={txState}
+                consensusMsg="Registering on GenLayer network..."
+              />
+            </>
+          )}
         </div>
       )}
 

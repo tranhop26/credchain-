@@ -335,11 +335,13 @@ export function useCredChain() {
     console.log('[Diagnostic] Extracted Tx Hash:', txHash);
     console.log('[Diagnostic] writeContract transaction hash:', txHash);
 
-    // 8. Wait for transaction receipt finalization
+    // 8. Wait for transaction receipt (waiting for ACCEPTED or FINALIZED status)
     try {
       await readClient.waitForTransactionReceipt({
         hash: txHash as any,
-        status: 'FINALIZED' as any,
+        status: 'ACCEPTED' as any,
+        interval: 5000,
+        retries: 60,
       });
     } catch (e: any) {
       console.error("CredChain transaction failure at waitForTransactionReceipt", {
@@ -353,6 +355,18 @@ export function useCredChain() {
         data: e?.data,
         stack: e?.stack,
       });
+
+      // On timeout, query status and accept if ACCEPTED or FINALIZED
+      try {
+        const receipt = await readClient.getTransactionReceipt({ hash: txHash as any }) as any;
+        console.log('[Diagnostic] Timeout fallback receipt:', receipt);
+        const status = receipt?.status;
+        if (status === 'ACCEPTED' || status === 'FINALIZED') {
+          return txHash;
+        }
+      } catch (receiptErr) {
+        console.error("Failed to fetch receipt on timeout", receiptErr);
+      }
       throw e;
     }
 
@@ -452,7 +466,7 @@ export function useCredChain() {
   }, []);
 
   return {
-    txState, resetTx,
+    txState, resetTx, succeedTx,
     registerCandidate, stakeBond, requestVerification, executeVerification,
     getCandidateProfile, getVerificationResult, isBlacklisted, getStake,
     callerAddress: address ?? '',
