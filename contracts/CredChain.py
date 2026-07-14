@@ -375,6 +375,7 @@ Respond with ONLY a JSON object (no markdown):
   "reasoning": "<2-3 sentences citing specific evidence>",
   "fraud_detected": <true or false>
 }}"""
+            # POLICY DECISION: AI analyzes raw web content and provides verification result
             return gl.nondet.exec_prompt(analysis_task, response_format="json")
 
         def validator_fn(leader_result) -> bool:
@@ -400,6 +401,7 @@ Respond with ONLY a JSON object (no markdown):
                     return False
                 
                 # Semantic validator cross-check
+                # POLICY DECISION: Validator runs a semantic cross-check using exec_prompt to verify consensus
                 cross_prompt = f"Check if reasoning '{reasoning}' supports verdict '{data.get('verdict')}' for claimed skills '{claimed_skills}'. Respond with AGREE or DISAGREE."
                 val_res = gl.nondet.exec_prompt(cross_prompt)
                 if "AGREE" not in val_res:
@@ -415,8 +417,11 @@ Respond with ONLY a JSON object (no markdown):
         candidate_address = req["candidate_address"]
         result_data["verified_at"] = 0
         result_data["request_id"] = request_id_str
+        
+        # ON-CHAIN STATE UPDATE: Save verification details directly to contract storage
         self.verifications[candidate_address] = json.dumps(result_data)
 
+        # ON-CHAIN STATE UPDATE: Update candidate status directly based on the AI policy decision
         cand_obj = json.loads(self.candidates[candidate_address])
         cand_obj["status"] = result_data["verdict"]
         self.candidates[candidate_address] = json.dumps(cand_obj)
@@ -458,6 +463,7 @@ Respond with ONLY a JSON object containing a list of strings:
     "Question 3..."
   ]
 }}"""
+            # POLICY DECISION: AI technical interviewer generates custom interview questions based on claimed skills
             return gl.nondet.exec_prompt(prompt, response_format="json")
 
         def validator_fn(leader_result) -> bool:
@@ -475,6 +481,7 @@ Respond with ONLY a JSON object containing a list of strings:
                         return False
                 
                 # Semantic validator cross-check
+                # POLICY DECISION: Validator runs a semantic cross-check using exec_prompt to verify consensus
                 cross_prompt = f"Are these questions relevant to {claimed_skills}: {', '.join(questions)}? Respond with AGREE or DISAGREE."
                 val_res = gl.nondet.exec_prompt(cross_prompt)
                 if "AGREE" not in val_res:
@@ -486,6 +493,7 @@ Respond with ONLY a JSON object containing a list of strings:
         result_raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
         result_data = robust_json_loads(result_raw)
         
+        # ON-CHAIN STATE UPDATE: Save generated questions and update interview status directly to contract storage
         self.interview_questions[cand_addr_str] = json.dumps(result_data["questions"])
         self.interview_status[cand_addr_str] = "GENERATED"
 
@@ -529,6 +537,7 @@ Respond with ONLY a JSON object containing:
   "score": <integer 0-100>,
   "feedback": "<2-3 sentences explaining the grade>"
 }}"""
+            # POLICY DECISION: AI technical examiner grades candidate responses
             return gl.nondet.exec_prompt(prompt, response_format="json")
 
         def validator_fn(leader_result) -> bool:
@@ -551,6 +560,7 @@ Respond with ONLY a JSON object containing:
   "score": <integer 0-100>,
   "feedback": "<2-3 sentences explaining the grade>"
 }}"""
+                # POLICY DECISION: Validator runs a second prompt to grade the candidate and cross-checks scores
                 val_raw = gl.nondet.exec_prompt(prompt, response_format="json")
                 val_data = robust_json_loads(val_raw)
                 val_score = val_data.get("score")
@@ -568,9 +578,12 @@ Respond with ONLY a JSON object containing:
         result_data = robust_json_loads(result_raw)
         
         score_val = u256(result_data["score"])
+        
+        # ON-CHAIN STATE UPDATE: Save interview score and update status in contract storage
         self.interview_score[cand_addr_str] = score_val
         self.interview_status[cand_addr_str] = "GRADED"
         
+        # ON-CHAIN STATE UPDATE: Update reputation score and evaluate candidate tier dynamically
         self.reputation_scores[cand_addr_str] = score_val
         self._update_tier(cand_addr_str)
 
@@ -715,6 +728,7 @@ Respond with ONLY a JSON object (no markdown):
   "verdict": "VERIFIED" or "PARTIAL" or "UNVERIFIED",
   "reasoning": "<2-3 sentences justifying the decision>"
 }}"""
+            # POLICY DECISION: Supreme AI judge decides on the appeal case
             return gl.nondet.exec_prompt(analysis_task, response_format="json")
 
         def validator_fn(leader_result) -> bool:
@@ -728,6 +742,7 @@ Respond with ONLY a JSON object (no markdown):
                     return False
                 
                 # Semantic validator cross-check
+                # POLICY DECISION: Validator runs a semantic cross-check using exec_prompt to verify consensus on appeal
                 cross_prompt = f"Validate if appeal verdict '{data.get('verdict')}' and reasoning '{data.get('reasoning', '')}' are justified for appeal '{appeal_reason}'. Respond with AGREE or DISAGREE."
                 val_res = gl.nondet.exec_prompt(cross_prompt)
                 if "AGREE" not in val_res:
@@ -742,6 +757,7 @@ Respond with ONLY a JSON object (no markdown):
         verdict = result_data["verdict"]
         
         if verdict in ["VERIFIED", "PARTIAL"]:
+            # ON-CHAIN STATE UPDATE: Appeal won - restore stake and remove from blacklist
             self.stakes[cand_str] = u256(1000)
             self.staked_amount[cand_str] = u256(1000)
             self.blacklist[cand_str] = False
@@ -752,6 +768,7 @@ Respond with ONLY a JSON object (no markdown):
             gl.send(candidate_address, u256(100))
             appeal["status"] = "WON"
         else:
+            # ON-CHAIN STATE UPDATE: Appeal lost - appeal status is marked as LOST
             appeal["status"] = "LOST"
             
         self.appeals[cand_str] = json.dumps(appeal)

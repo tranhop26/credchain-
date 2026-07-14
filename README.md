@@ -21,20 +21,65 @@ The result: hiring decisions are based on unverified claims, costing companies b
 
 ---
 
-## Why this project belongs on GenLayer (Why GenLayer is Non-Negotiable)
+## Why this project belongs on GenLayer (Tại sao cần GenLayer)
 
-CredChain is an Intelligent Contract that **belongs on GenLayer because it is architecturally impossible to implement on EVM or deterministic-only blockchains**. It requires native on-chain AI reasoning (`gl.nondet.exec_prompt`) to analyze subjective engineering profiles, and native web access (`gl.nondet.web.render`) to query live GitHub/portfolio evidence. Without GenLayer's semantic consensus and Optimistic Democracy, a standard smart contract would be deterministic-only and incapable of performing off-chain data retrieval or subjective evaluation.
+### 1. Tại sao cần GenLayer (Deterministic vs Non-Deterministic)
+CredChain giải quyết bài toán xác thực thông tin ứng viên (CV/GitHub) và chấm điểm năng lực thông qua phỏng vấn kỹ thuật. Bài toán này có những phần cốt lõi **mang tính phi tất định (non-deterministic)**:
+*   **Đọc và thẩm định tài liệu bên ngoài (GitHub/Portfolio)**: Dữ liệu này nằm ở các trang web động, thay đổi liên tục và không thể dự đoán trước. Smart contract truyền thống (như Solidity trên EVM) bị cô lập khỏi internet và hoàn toàn không thể truy cập các tài nguyên này trực tiếp từ trên chuỗi.
+*   **Đánh giá năng lực kỹ thuật và phát hiện gian lận bằng AI**: Đánh giá sự tương xứng giữa các dự án trên GitHub với các kỹ năng đã khai báo hoặc đánh giá câu trả lời phỏng vấn tự luận là những công việc đòi hỏi trí tuệ nhân tạo (LLM) để ra quyết định mang tính chủ quan (subjective policy decision). Việc này không thể giải quyết bằng các hàm logic `if-else` cứng nhắc của smart contract truyền thống.
+*   **Đồng thuận trên kết quả AI (Optimistic Democracy)**: LLM có tính chất sinh chữ ngẫu nhiên, dẫn đến việc hai node chạy cùng một prompt có thể cho ra hai câu trả lời khác nhau một chút về câu chữ nhưng cùng chung một ý nghĩa. GenLayer giải quyết vấn đề này thông qua cơ chế đồng thuận ngữ nghĩa (semantic consensus) và hệ thống Optimistic Democracy, cho phép các node thẩm định đạt được sự thống nhất trên kết quả phi tất định của LLM, bảo vệ tính thực tế và ngăn chặn việc ghi nhận sai lệch lên blockchain.
 
-Here is the dependency map:
+---
 
-| What CredChain needs | Why Solidity fails | How GenLayer solves it |
-|---|---|---|
-| Read a GitHub profile on-chain | No internet access | `gl.nondet.web.render(github_url)` |
-| Interpret commit history semantically | No AI/ML | `gl.nondet.exec_prompt(analysis_task)` |
-| Reach consensus on a subjective verdict | Non-deterministic = invalid | Optimistic Democracy + validator cross-check |
-| Store verdicts permanently | ✓ (but needs data) | `TreeMap[str, str]` on GenLayer |
+### 2. Các điểm gọi AI (`gl.nondet.exec_prompt`) và Ràng buộc luồng (Policy Binding)
 
-Remove `web.render` and `exec_prompt` → the contract becomes an empty staking shell with no ability to verify anything. The AI layer IS the product.
+Trong contract [`contracts/CredChain.py`](./contracts/CredChain.py), kết quả từ các lệnh gọi AI không chỉ dừng lại ở việc hiển thị, mà **được sử dụng trực tiếp để thay đổi trạng thái (on-chain state) và điều hướng luồng thực thi**:
+
+1.  **Xác thực hồ sơ ứng viên (`execute_verification`)**:
+    *   **Prompt Leader (Dòng 378)**: Sử dụng LLM phân tích nội dung GitHub và đưa ra kết quả phân loại (`VERIFIED`/`PARTIAL`/`UNVERIFIED`) cùng dấu hiệu gian lận (`fraud_detected`).
+    *   **Prompt Validator (Dòng 404)**: Validator thực hiện thẩm định chéo (cross-check) ngữ nghĩa xem lập luận của Leader có nhất quán với kết luận không.
+    *   **Ràng buộc trạng thái (State Update)**: Kết quả của chính sách này được ghi đè trực tiếp vào hồ sơ ứng viên (`self.candidates`) và bảng xác thực (`self.verifications`). Nếu phát hiện gian lận (`fraud_detected = True`), luồng thực thi sẽ kích hoạt cơ chế phạt (slash): tịch thu toàn bộ tiền ký quỹ (`self.staked_amount` và `self.stakes` về 0) và đưa ứng viên vào danh sách đen (`self.blacklist`).
+2.  **Tạo câu hỏi phỏng vấn (`generate_interview_questions`)**:
+    *   **Prompt Leader (Dòng 464)**: Tạo ngẫu nhiên 3 câu hỏi phỏng vấn kỹ thuật dựa theo danh sách kỹ năng đã đăng ký.
+    *   **Prompt Validator (Dòng 484)**: Validator kiểm tra xem câu hỏi có thực sự liên quan đến kỹ năng của ứng viên hay không.
+    *   **Ràng buộc trạng thái**: Lưu câu hỏi trực tiếp vào `self.interview_questions` và cập nhật trạng thái phỏng vấn của ứng viên thành `GENERATED`.
+3.  **Chấm điểm phỏng vấn (`grade_interview`)**:
+    *   **Prompt Leader (Dòng 540)** và **Validator (Dòng 562)**: Cùng chấm điểm câu trả lời tự luận của ứng viên từ 0-100 và đối chiếu lệch điểm không quá 10.
+    *   **Ràng buộc trạng thái**: Điểm số được lưu trực tiếp vào `self.interview_score` và `self.reputation_scores`. Kết quả điểm này cũng trực tiếp quyết định thứ hạng tier (Silver, Gold, Platinum) của ứng viên trên chuỗi.
+4.  **Xử lý kháng cáo (`execute_appeal`)**:
+    *   **Prompt Leader (Dòng 731)** và **Validator (Dòng 745)**: Xem xét lại toàn bộ bằng chứng và lý do kháng cáo của ứng viên.
+    *   **Ràng buộc trạng thái**: Nếu kháng cáo thành công, hệ thống sẽ khôi phục lại khoản tiền phạt ký quỹ, loại ứng viên khỏi danh sách đen, trả tiền về ví và khôi phục trạng thái hồ sơ của ứng viên thành `VERIFIED`.
+
+---
+
+### 3. Sơ đồ luồng thực thi (Execution Workflow)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 👤 Ứng viên / Nhà tuyển dụng
+    participant App as 💻 Giao diện (React App)
+    participant Contract as 📄 Intelligent Contract (CredChain.py)
+    participant GenVM as 🤖 GenLayer Validators (Consensus)
+    
+    User->>App: Gửi yêu cầu (Ví dụ: Đăng ký + Ký quỹ)
+    App->>Contract: Gọi hàm writeContract (Ví dụ: register_candidate / stake_bond)
+    Note over Contract: Cập nhật trạng thái ban đầu của ví
+    
+    User->>App: Yêu cầu xác thực hồ sơ (Trigger Verification)
+    App->>Contract: Gọi writeContract (request_verification + execute_verification)
+    Contract->>GenVM: Gọi gl.vm.run_nondet_unsafe (chạy Leader & Validator)
+    Note over GenVM: Leader & Validator gọi gl.nondet.exec_prompt()
+    GenVM->>GenVM: Đạt sự đồng thuận ngữ nghĩa (Semantic Consensus)
+    GenVM-->>Contract: Trả về kết quả xác thực (Verdict)
+    
+    Note over Contract: Cập nhật On-Chain State:<br/>- Ghi đè trạng thái hồ sơ ứng viên<br/>- Phạt (Slash) & Đưa vào danh sách đen nếu có fraud
+    
+    Contract-->>App: Giao dịch thành công (ACCEPTED)
+    App->>Contract: Gọi readClient.readContract() đọc trạng thái mới
+    Contract-->>App: Trả về trạng thái đã cập nhật
+    App->>User: Hiển thị kết quả & giao diện tương ứng (Đã xác thực / Bị phạt)
+```
 
 ---
 
@@ -227,7 +272,7 @@ cd app && npm run dev
 
 - **App:** https://credchain-eight.vercel.app/
 - **Video:** [YOUTUBE/LOOM — add after recording]
-- **Contract:** `0x3396Cb7058AB6E739D0d98297E57C7A7f9Ea5101` (GenLayer Studionet)
+- **Contract:** `0x3E57Cf4f4D71af895EDf695c8ad9dA09732833D3` (GenLayer Studionet)
 
 ---
 
