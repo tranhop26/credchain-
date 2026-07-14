@@ -5,7 +5,7 @@ import { useState, useCallback } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { isAddress, fromHex } from 'viem';
 
-const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0xd3577B8b3aE3455BA7E181C875DC40B3abb1b135') as `0x${string}`;
+const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0xfd36224cc3ea472223d31143C887f11A7B27e11b') as `0x${string}`;
 
 function toCalldataAddress(addr: string): CalldataAddress {
   const clean = addr.toLowerCase().trim();
@@ -855,6 +855,30 @@ export function useCredChain() {
     return list;
   }, []);
 
+  const getCandidateFullState = useCallback(async (addr: string): Promise<any | null> => {
+    if (!addr || !isAddress(addr)) return null;
+    const cleanAddr = addr.toLowerCase().trim();
+    try {
+      const raw = await sendRead<string>('get_candidate_full_state', [toCalldataAddress(cleanAddr)]);
+      if (!raw || raw === '') return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      console.error('[Diagnostic] getCandidateFullState error:', e);
+      return null;
+    }
+  }, []);
+
+  const getActiveJobsFull = useCallback(async (): Promise<any[]> => {
+    try {
+      const raw = await sendRead<string>('get_active_jobs_full', []);
+      if (!raw || raw === '') return [];
+      return JSON.parse(raw);
+    } catch (e) {
+      console.error('[Diagnostic] getActiveJobsFull error:', e);
+      return [];
+    }
+  }, []);
+
   return {
     txState, resetTx, succeedTx,
     registerCandidate, stakeBond, requestVerification, executeVerification,
@@ -866,6 +890,7 @@ export function useCredChain() {
     getReputationScore, getCandidateTier, getInterviewQuestions, getInterviewAnswers,
     getInterviewScore, getInterviewStatus, getJobBounty, getJobEscrow, getJobApplicants,
     getAppeal, getAppealUsed, getJobBounties,
+    getCandidateFullState, getActiveJobsFull,
     callerAddress: address ?? '',
     contractAddress: CONTRACT_ADDRESS,
   };

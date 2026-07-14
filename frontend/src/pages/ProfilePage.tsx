@@ -7,10 +7,7 @@ import { useCredChain, type CandidateProfile, type VerificationResult } from '..
 export function ProfilePage() {
   const { address: routeAddress } = useParams<{ address: string }>();
   const navigate = useNavigate();
-  const {
-    getCandidateProfile, getVerificationResult, getStake, isBlacklisted,
-    getReputationScore, getCandidateTier, getInterviewScore, getInterviewStatus,
-  } = useCredChain();
+  const { getCandidateFullState } = useCredChain();
 
   const [searchAddr, setSearchAddr] = useState(routeAddress || '');
   const [profile, setProfile] = useState<CandidateProfile | null>(null);
@@ -33,25 +30,29 @@ export function ProfilePage() {
     setSearched(true);
     setErrorState(null);
     try {
-      const p = await getCandidateProfile(addr);
-      setProfile(p);
-      if (p) {
-        const [r, s, b, rep, t, intScore, intStatus] = await Promise.all([
-          getVerificationResult(addr),
-          getStake(addr),
-          isBlacklisted(addr),
-          getReputationScore(addr),
-          getCandidateTier(addr),
-          getInterviewScore(addr),
-          getInterviewStatus(addr),
-        ]);
-        setResult(r);
-        setStake(s);
-        setBlacklisted(b);
-        setReputation(rep);
-        setTier(t);
-        setInterviewScore(intScore);
-        setInterviewStatus(intStatus);
+      const state = await getCandidateFullState(addr);
+      if (state) {
+        const p = state.profile ? JSON.parse(state.profile) : null;
+        setProfile(p);
+        if (p) {
+          const r = state.verification_result ? JSON.parse(state.verification_result) : null;
+          setResult(r);
+          setStake(state.stake);
+          setBlacklisted(state.blacklist);
+          setReputation(state.reputation);
+          setTier(state.tier);
+          setInterviewScore(state.interview_score);
+          setInterviewStatus(state.interview_status);
+        }
+      } else {
+        setProfile(null);
+        setResult(null);
+        setStake(0);
+        setBlacklisted(false);
+        setReputation(0);
+        setTier('NONE');
+        setInterviewScore(0);
+        setInterviewStatus('NOT_STARTED');
       }
     } catch (err: any) {
       console.error('[ProfilePage] loadProfile failed:', err);

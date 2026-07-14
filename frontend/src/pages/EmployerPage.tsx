@@ -9,9 +9,8 @@ export function EmployerPage() {
   const {
     txState, resetTx,
     requestVerification, executeVerification,
-    getCandidateProfile, getVerificationResult,
     createJobBounty, cancelJobBounty, applyToJobBounty, awardJobBounty,
-    getJobEscrow, getJobApplicants, getJobBounties,
+    getCandidateFullState, getActiveJobsFull,
     callerAddress,
   } = useCredChain();
 
@@ -45,15 +44,20 @@ export function EmployerPage() {
     setIsLoadingProfile(true);
     setErrorState(null);
     try {
-      const [p, r] = await Promise.all([
-        getCandidateProfile(lookupAddr.trim()),
-        getVerificationResult(lookupAddr.trim()),
-      ]);
-      setCandidateProfile(p);
-      setVerificationResult(r);
-      if (p) {
-        setCandidateAddr(lookupAddr.trim());
+      const state = await getCandidateFullState(lookupAddr.trim());
+      if (state) {
+        const p = state.profile ? JSON.parse(state.profile) : null;
+        const r = state.verification_result ? JSON.parse(state.verification_result) : null;
+        setCandidateProfile(p);
+        setVerificationResult(r);
+        if (p) {
+          setCandidateAddr(lookupAddr.trim());
+        } else {
+          setErrorState('Candidate genuinely not registered.');
+        }
       } else {
+        setCandidateProfile(null);
+        setVerificationResult(null);
         setErrorState('Candidate genuinely not registered.');
       }
     } catch (err: any) {
@@ -81,12 +85,11 @@ export function EmployerPage() {
     resetTx();
     await executeVerification(rid);
     if (candidateAddr) {
-      const [p, r] = await Promise.all([
-        getCandidateProfile(candidateAddr),
-        getVerificationResult(candidateAddr),
-      ]);
-      setCandidateProfile(p);
-      setVerificationResult(r);
+      const state = await getCandidateFullState(candidateAddr);
+      if (state) {
+        setCandidateProfile(state.profile ? JSON.parse(state.profile) : null);
+        setVerificationResult(state.verification_result ? JSON.parse(state.verification_result) : null);
+      }
     }
     setVerifyStep(3);
   };
@@ -95,28 +98,14 @@ export function EmployerPage() {
   const loadJobs = useCallback(async () => {
     setIsLoadingJobs(true);
     try {
-      const allJobs = await getJobBounties();
-      // Load details for each job (escrow and applicants)
-      const detailedJobs = await Promise.all(
-        allJobs.map(async (job) => {
-          const [escrow, applicants] = await Promise.all([
-            getJobEscrow(String(job.id)),
-            getJobApplicants(String(job.id)),
-          ]);
-          return {
-            ...job,
-            escrow,
-            applicants,
-          };
-        })
-      );
+      const detailedJobs = await getActiveJobsFull();
       setJobsList(detailedJobs);
     } catch (err: any) {
       console.error('[EmployerPage] loadJobs error:', err);
     } finally {
       setIsLoadingJobs(false);
     }
-  }, [getJobBounties, getJobEscrow, getJobApplicants]);
+  }, [getActiveJobsFull]);
 
   useEffect(() => {
     if (activeTab === 'jobs') {

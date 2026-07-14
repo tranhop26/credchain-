@@ -13,10 +13,7 @@ export function CandidatePage() {
     registerCandidateExtended, stake, unstake,
     generateInterviewQuestions, submitInterviewAnswers, gradeInterview,
     submitAppeal, executeAppeal,
-    getCandidateProfile, getVerificationResult, getStake,
-    getReputationScore, getCandidateTier, getInterviewQuestions,
-    getInterviewAnswers, getInterviewScore, getInterviewStatus,
-    getAppeal, getAppealUsed,
+    getCandidateProfile, getCandidateFullState,
     callerAddress,
   } = useCredChain();
 
@@ -49,36 +46,49 @@ export function CandidatePage() {
     setIsLoadingProfile(true);
     setErrorState(null);
     try {
-      const p = await getCandidateProfile(callerAddress);
-      setProfile(p);
-      if (p) {
-        const [r, s, rep, t, status, q, a, score, ap, apUsed] = await Promise.all([
-          getVerificationResult(callerAddress),
-          getStake(callerAddress),
-          getReputationScore(callerAddress),
-          getCandidateTier(callerAddress),
-          getInterviewStatus(callerAddress),
-          getInterviewQuestions(callerAddress),
-          getInterviewAnswers(callerAddress),
-          getInterviewScore(callerAddress),
-          getAppeal(callerAddress),
-          getAppealUsed(callerAddress),
-        ]);
-        setResult(r);
-        setStakeAmount(s);
-        setReputation(rep);
-        setTier(t);
-        setInterviewStatus(status);
-        setInterviewQuestions(q);
-        setInterviewAnswers(a);
-        setInterviewScore(score);
-        setAppeal(ap);
-        setAppealUsed(apUsed);
+      const state = await getCandidateFullState(callerAddress);
+      if (state) {
+        const p = state.profile ? JSON.parse(state.profile) : null;
+        setProfile(p);
+        
+        if (p) {
+          const r = state.verification_result ? JSON.parse(state.verification_result) : null;
+          setResult(r);
+          setStakeAmount(state.stake);
+          setReputation(state.reputation);
+          setTier(state.tier);
+          setInterviewStatus(state.interview_status);
+          
+          const q = state.interview_questions ? JSON.parse(state.interview_questions) : [];
+          setInterviewQuestions(q);
+          
+          const a = state.interview_answers ? JSON.parse(state.interview_answers) : [];
+          setInterviewAnswers(a);
+          
+          setInterviewScore(state.interview_score);
+          
+          const ap = state.appeal ? JSON.parse(state.appeal) : null;
+          setAppeal(ap);
+          
+          setAppealUsed(state.appeal_used);
 
-        // Pre-fill answers inputs if questions are loaded but no answers yet
-        if (q && q.length > 0 && answersInput.length === 0) {
-          setAnswersInput(new Array(q.length).fill(''));
+          // Pre-fill answers inputs if questions are loaded but no answers yet
+          if (q && q.length > 0 && answersInput.length === 0) {
+            setAnswersInput(new Array(q.length).fill(''));
+          }
         }
+      } else {
+        setProfile(null);
+        setResult(null);
+        setStakeAmount(0);
+        setReputation(0);
+        setTier('NONE');
+        setInterviewStatus('NOT_STARTED');
+        setInterviewQuestions([]);
+        setInterviewAnswers([]);
+        setInterviewScore(0);
+        setAppeal(null);
+        setAppealUsed(false);
       }
     } catch (err: any) {
       console.error('[CandidatePage] refreshProfile error:', err);
@@ -87,7 +97,7 @@ export function CandidatePage() {
     } finally {
       setIsLoadingProfile(false);
     }
-  }, [callerAddress, getCandidateProfile, getVerificationResult, getStake, getReputationScore, getCandidateTier, getInterviewStatus, getInterviewQuestions, getInterviewAnswers, getInterviewScore, getAppeal, getAppealUsed, answersInput.length]);
+  }, [callerAddress, getCandidateFullState, answersInput.length]);
 
   useEffect(() => {
     if (callerAddress) {

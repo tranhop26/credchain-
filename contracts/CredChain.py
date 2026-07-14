@@ -828,3 +828,37 @@ Respond with ONLY a JSON object (no markdown):
     @gl.public.view
     def get_appeal_used(self, address: Address) -> bool:
         return self.appeal_used.get(str(address), False)
+
+    @gl.public.view
+    def get_candidate_full_state(self, address: Address) -> str:
+        addr_str = str(address)
+        state = {
+            "profile": self.candidates.get(addr_str, ""),
+            "verification_result": self.verifications.get(addr_str, ""),
+            "stake": int(self.staked_amount.get(addr_str, u256(0))),
+            "reputation": int(self.reputation_scores.get(addr_str, u256(0))),
+            "tier": self.candidate_tier.get(addr_str, "NONE"),
+            "interview_status": self.interview_status.get(addr_str, "NOT_STARTED"),
+            "interview_questions": self.interview_questions.get(addr_str, ""),
+            "interview_answers": self.interview_answers.get(addr_str, ""),
+            "interview_score": int(self.interview_score.get(addr_str, u256(0))),
+            "appeal": self.appeals.get(addr_str, ""),
+            "appeal_used": self.appeal_used.get(addr_str, False),
+            "blacklist": self.blacklist.get(addr_str, False)
+        }
+        return json.dumps(state)
+
+    @gl.public.view
+    def get_active_jobs_full(self) -> str:
+        jobs = []
+        limit = int(self.bounty_counter)
+        for i in range(limit):
+            job_id = u256(i)
+            if job_id in self.job_bounties:
+                job_raw = self.job_bounties[job_id]
+                if job_raw:
+                    job = json.loads(job_raw)
+                    job["escrow"] = int(self.job_escrow.get(job_id, u256(0)))
+                    job["applicants"] = json.loads(self.job_applicants.get(job_id, "[]"))
+                    jobs.append(job)
+        return json.dumps(jobs)
