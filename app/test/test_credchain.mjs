@@ -5,7 +5,7 @@ import { studionet } from 'genlayer-js/chains';
 import { fromHex } from 'viem';
 import assert from 'assert';
 
-const CONTRACT = '0xB8366483717182772b1B4eD38d050A8f4f885161';
+const CONTRACT = '0x7a474602Df6476E5555cE4359b366939F6e9F796';
 
 const readClient = createClient({ chain: studionet });
 

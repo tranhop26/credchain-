@@ -272,7 +272,7 @@ cd app && npm run dev
 
 - **App:** https://credchain-eight.vercel.app/
 - **Video:** [YOUTUBE/LOOM — add after recording]
-- **Contract:** `0xB8366483717182772b1B4eD38d050A8f4f885161` (GenLayer Studionet)
+- **Contract:** `0x7a474602Df6476E5555cE4359b366939F6e9F796` (GenLayer Studionet)
 
 ---
 
