@@ -473,7 +473,7 @@ Respond with ONLY a JSON object:
                         if not val_res_data.get("agree", False):
                             return False
                     except Exception:
-                        pass
+                        return False
                 
                 return True
             except Exception:
