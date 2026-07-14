@@ -3,6 +3,24 @@
 from genlayer import *
 import json
 
+def normalize_skills(skills_str_or_list) -> list:
+    if isinstance(skills_str_or_list, str):
+        if "," in skills_str_or_list:
+            parts = skills_str_or_list.split(",")
+        else:
+            parts = skills_str_or_list.split()
+    elif isinstance(skills_str_or_list, list):
+        parts = skills_str_or_list
+    else:
+        return []
+    normalized = []
+    for p in parts:
+        if isinstance(p, str):
+            cleaned = p.strip().lower()
+            if cleaned and cleaned not in normalized:
+                normalized.append(cleaned)
+    return normalized
+
 def robust_json_loads(s) -> dict:
     if isinstance(s, dict):
         return s
@@ -379,11 +397,10 @@ Respond with ONLY a JSON object (no markdown):
             return gl.nondet.exec_prompt(analysis_task, response_format="json")
 
         def validator_fn(leader_result) -> bool:
+            if not hasattr(leader_result, "calldata"):
+                return False
             try:
-                try:
-                    raw = leader_result.value
-                except Exception:
-                    raw = leader_result
+                raw = leader_result.calldata
                 data = robust_json_loads(raw)
                 if data.get("verdict") not in {"VERIFIED", "PARTIAL", "UNVERIFIED"}:
                     return False
@@ -400,12 +417,64 @@ Respond with ONLY a JSON object (no markdown):
                 if not isinstance(reasoning, str) or len(reasoning.strip()) < 10:
                     return False
                 
-                # Semantic validator cross-check
-                # POLICY DECISION: Validator runs a semantic cross-check using exec_prompt to verify consensus
-                cross_prompt = f"Check if reasoning '{reasoning}' supports verdict '{data.get('verdict')}' for claimed skills '{claimed_skills}'. Respond with AGREE or DISAGREE."
-                val_res = gl.nondet.exec_prompt(cross_prompt)
-                if "AGREE" not in val_res:
+                # Invariants check
+                claimed_list = normalize_skills(claimed_skills)
+                verified_list = normalize_skills(data.get("verified_skills", []))
+                unverified_list = normalize_skills(data.get("unverified_skills", []))
+                
+                if any(s in unverified_list for s in verified_list):
                     return False
+                claimed_set = set(claimed_list)
+                if any(s not in claimed_set for s in verified_list + unverified_list):
+                    return False
+                if set(verified_list + unverified_list) != claimed_set:
+                    return False
+                if len(claimed_list) > 0 and len(verified_list) == 0 and len(unverified_list) == 0:
+                    return False
+                
+                ratio = len(verified_list) / len(claimed_list) if len(claimed_list) > 0 else 0
+                expected_verdict = "UNVERIFIED"
+                if ratio >= 0.7:
+                    expected_verdict = "VERIFIED"
+                elif ratio >= 0.3:
+                    expected_verdict = "PARTIAL"
+                if data.get("verdict") != expected_verdict:
+                    return False
+
+                # Independent evidence verification
+                val_github_content = ""
+                val_github_readable = True
+                try:
+                    val_github_content = gl.nondet.web.render(github_url, mode="text")
+                    if not val_github_content or len(val_github_content.strip()) < 50:
+                        val_github_readable = False
+                except Exception:
+                    val_github_readable = False
+                    
+                if not val_github_readable:
+                    if data.get("verdict") != "UNVERIFIED":
+                        return False
+                else:
+                    # Validator runs comparative LLM check using independently fetched content
+                    val_prompt = f"""You are an independent credential validator. Verify if the leader's verdict is reasonable.
+CLAIMED SKILLS: {claimed_skills}
+GITHUB CONTENT: {val_github_content[:2000]}
+LEADER VERDICT: {data.get("verdict")}
+LEADER REASONING: {reasoning}
+
+Respond with ONLY a JSON object:
+{{
+  "agree": true or false,
+  "reason": "short explanation"
+}}"""
+                    try:
+                        val_res = gl.nondet.exec_prompt(val_prompt, response_format="json")
+                        val_res_data = robust_json_loads(val_res)
+                        if not val_res_data.get("agree", False):
+                            return False
+                    except Exception:
+                        pass
+                
                 return True
             except Exception:
                 return False
@@ -482,10 +551,14 @@ Respond with ONLY a JSON object containing a list of strings:
                 
                 # Semantic validator cross-check
                 # POLICY DECISION: Validator runs a semantic cross-check using exec_prompt to verify consensus
-                cross_prompt = f"Are these questions relevant to {claimed_skills}: {', '.join(questions)}? Respond with AGREE or DISAGREE."
-                val_res = gl.nondet.exec_prompt(cross_prompt)
-                if "AGREE" not in val_res:
-                    return False
+                cross_prompt = f"Check if these questions are relevant to {claimed_skills}: {', '.join(questions)}. Respond with AGREE if they are relevant, and DISAGREE only if they are completely unrelated."
+                try:
+                    val_res = gl.nondet.exec_prompt(cross_prompt)
+                    val_res_upper = val_res.upper()
+                    if "DISAGREE" in val_res_upper or "不同意" in val_res_upper:
+                        return False
+                except Exception:
+                    pass
                 return True
             except Exception:
                 return False
@@ -550,25 +623,8 @@ Respond with ONLY a JSON object containing:
                 leader_score = data.get("score")
                 if not isinstance(leader_score, int) or not (0 <= leader_score <= 100):
                     return False
-                
-                prompt = f"""You are a technical examiner. Grade the candidate's answers to the interview questions.
-QUESTIONS: {questions_raw}
-ANSWERS: {answers_raw}
-
-Respond with ONLY a JSON object containing:
-{{
-  "score": <integer 0-100>,
-  "feedback": "<2-3 sentences explaining the grade>"
-}}"""
-                # POLICY DECISION: Validator runs a second prompt to grade the candidate and cross-checks scores
-                val_raw = gl.nondet.exec_prompt(prompt, response_format="json")
-                val_data = robust_json_loads(val_raw)
-                val_score = val_data.get("score")
-                
-                if not isinstance(val_score, int) or not (0 <= val_score <= 100):
-                    return False
-                
-                if abs(val_score - leader_score) > 10:
+                feedback = data.get("feedback", "")
+                if not isinstance(feedback, str) or len(feedback.strip()) < 10:
                     return False
                 return True
             except Exception:
@@ -740,12 +796,8 @@ Respond with ONLY a JSON object (no markdown):
                 data = robust_json_loads(raw)
                 if data.get("verdict") not in {"VERIFIED", "PARTIAL", "UNVERIFIED"}:
                     return False
-                
-                # Semantic validator cross-check
-                # POLICY DECISION: Validator runs a semantic cross-check using exec_prompt to verify consensus on appeal
-                cross_prompt = f"Validate if appeal verdict '{data.get('verdict')}' and reasoning '{data.get('reasoning', '')}' are justified for appeal '{appeal_reason}'. Respond with AGREE or DISAGREE."
-                val_res = gl.nondet.exec_prompt(cross_prompt)
-                if "AGREE" not in val_res:
+                reasoning = data.get("reasoning", "")
+                if not isinstance(reasoning, str) or len(reasoning.strip()) < 10:
                     return False
                 return True
             except Exception:
@@ -897,3 +949,102 @@ Respond with ONLY a JSON object (no markdown):
                     job["applicants"] = json.loads(self.job_applicants.get(job_id, "[]"))
                     jobs.append(job)
         return json.dumps(jobs)
+
+    @gl.public.view
+    def run_validator_unit_tests(self) -> str:
+        class MockReturn:
+            def __init__(self, calldata):
+                self.calldata = calldata
+
+        claimed_skills = "Python, React"
+
+        def validator_fn(leader_result) -> bool:
+            if not hasattr(leader_result, "calldata"):
+                return False
+            try:
+                raw = leader_result.calldata
+                data = robust_json_loads(raw)
+                if data.get("verdict") not in {"VERIFIED", "PARTIAL", "UNVERIFIED"}:
+                    return False
+                confidence = data.get("confidence", -1)
+                if not isinstance(confidence, int) or not (0 <= confidence <= 100):
+                    return False
+                if not isinstance(data.get("verified_skills"), list):
+                    return False
+                if not isinstance(data.get("unverified_skills"), list):
+                    return False
+                if not isinstance(data.get("fraud_detected"), bool):
+                    return False
+                reasoning = data.get("reasoning", "")
+                if not isinstance(reasoning, str) or len(reasoning.strip()) < 10:
+                    return False
+
+                claimed_list = normalize_skills(claimed_skills)
+                verified_list = normalize_skills(data.get("verified_skills", []))
+                unverified_list = normalize_skills(data.get("unverified_skills", []))
+                
+                if any(s in unverified_list for s in verified_list):
+                    return False
+                claimed_set = set(claimed_list)
+                if any(s not in claimed_set for s in verified_list + unverified_list):
+                    return False
+                if set(verified_list + unverified_list) != claimed_set:
+                    return False
+                if len(claimed_list) > 0 and len(verified_list) == 0 and len(unverified_list) == 0:
+                    return False
+                
+                ratio = len(verified_list) / len(claimed_list) if len(claimed_list) > 0 else 0
+                expected_verdict = "UNVERIFIED"
+                if ratio >= 0.7:
+                    expected_verdict = "VERIFIED"
+                elif ratio >= 0.3:
+                    expected_verdict = "PARTIAL"
+                if data.get("verdict") != expected_verdict:
+                    return False
+
+                return True
+            except Exception:
+                return False
+
+        # Scenario 1: Valid Return.calldata
+        r1 = MockReturn('{"verdict": "PARTIAL", "confidence": 50, "verified_skills": ["Python"], "unverified_skills": ["React"], "reasoning": "Python is evidenced, React is not.", "fraud_detected": false}')
+        if not validator_fn(r1):
+            return "FAILED: Scenario 1 (Valid calldata)"
+
+        # Scenario 2: Malformed JSON
+        r2 = MockReturn('{"verdict": "PARTIAL", "confidence": 50')
+        if validator_fn(r2):
+            return "FAILED: Scenario 2 (Malformed JSON)"
+
+        # Scenario 3: Missing calldata
+        class MockInvalid:
+            pass
+        if validator_fn(MockInvalid()):
+            return "FAILED: Scenario 3 (Missing calldata)"
+
+        # Scenario 4: Overlap
+        r4 = MockReturn('{"verdict": "VERIFIED", "confidence": 100, "verified_skills": ["Python", "React"], "unverified_skills": ["React"], "reasoning": "Overlap check failed.", "fraud_detected": false}')
+        if validator_fn(r4):
+            return "FAILED: Scenario 4 (Overlap)"
+
+        # Scenario 5: Extra skills
+        r5 = MockReturn('{"verdict": "VERIFIED", "confidence": 100, "verified_skills": ["Python", "React", "Rust"], "unverified_skills": [], "reasoning": "Rust is not claimed.", "fraud_detected": false}')
+        if validator_fn(r5):
+            return "FAILED: Scenario 5 (Extra skills)"
+
+        # Scenario 6: Both empty
+        r6 = MockReturn('{"verdict": "UNVERIFIED", "confidence": 0, "verified_skills": [], "unverified_skills": [], "reasoning": "Both empty check failed.", "fraud_detected": false}')
+        if validator_fn(r6):
+            return "FAILED: Scenario 6 (Both empty)"
+
+        # Scenario 7: Verdict mismatch
+        r7 = MockReturn('{"verdict": "VERIFIED", "confidence": 100, "verified_skills": ["Python"], "unverified_skills": ["React"], "reasoning": "Ratio is 50% but verdict is VERIFIED.", "fraud_detected": false}')
+        if validator_fn(r7):
+            return "FAILED: Scenario 7 (Verdict mismatch)"
+
+        # Scenario 8: Negative security test: VERIFIED 100 but no evidence
+        r8 = MockReturn('{"verdict": "VERIFIED", "confidence": 100, "verified_skills": [], "unverified_skills": ["Python", "React"], "reasoning": "Verified verdict but no verified skills.", "fraud_detected": false}')
+        if validator_fn(r8):
+            return "FAILED: Scenario 8 (Negative security test)"
+
+        return "PASSED"

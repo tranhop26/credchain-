@@ -311,7 +311,7 @@ export function EmployerPage() {
                 disabled={!callerAddress || !candidateAddr || txState.status === 'pending'}
                 onClick={handleRequestVerification}
               >
-                {txState.status === 'pending' && verifyStep === 1
+                {txState.status === 'pending' && txState.pendingAction === 'request_verification'
                   ? <><span className="tx-spinner" style={{ width: 14, height: 14 }} /> Đang chờ đồng thuận từ GenLayer validators...</>
                   : 'Request Verification'
                 }
@@ -361,7 +361,7 @@ export function EmployerPage() {
                 disabled={(!requestId && !manualRequestId) || txState.status === 'pending'}
                 onClick={handleExecute}
               >
-                {txState.status === 'pending' && verifyStep >= 2
+                {txState.status === 'pending' && txState.pendingAction === 'execute_verification'
                   ? <><span className="tx-spinner" style={{ width: 14, height: 14 }} /> Đang chờ đồng thuận từ GenLayer validators...</>
                   : '🤖 Execute AI Verification'
                 }
@@ -539,7 +539,7 @@ export function EmployerPage() {
                               onClick={() => handleCancelJob(String(job.id))}
                               disabled={txState.status === 'pending'}
                             >
-                              {txState.status === 'pending'
+                              {txState.status === 'pending' && txState.pendingAction === 'cancel_job' && txState.pendingEntityId === String(job.id)
                                 ? 'Đang chờ đồng thuận...'
                                 : 'Cancel Job & Refund'
                               }
@@ -565,7 +565,7 @@ export function EmployerPage() {
                                   onClick={() => handleAwardJob(String(job.id))}
                                   disabled={txState.status === 'pending' || !selectedWinner[job.id]}
                                 >
-                                  {txState.status === 'pending'
+                                  {txState.status === 'pending' && txState.pendingAction === 'award_job' && txState.pendingEntityId === String(job.id)
                                     ? 'Đang chờ đồng thuận...'
                                     : 'Award Bounty'
                                   }
@@ -586,7 +586,7 @@ export function EmployerPage() {
                               job.applicants?.some((app: string) => app.toLowerCase() === callerAddress.toLowerCase())
                             }
                           >
-                            {txState.status === 'pending'
+                            {txState.status === 'pending' && txState.pendingAction === 'apply_job' && txState.pendingEntityId === String(job.id)
                               ? 'Đang chờ đồng thuận...'
                               : job.applicants?.some((app: string) => app.toLowerCase() === callerAddress.toLowerCase())
                                 ? '✓ Applied'

@@ -55,6 +55,8 @@ export interface TxState {
   hash?: string;
   message?: string;
   error?: string;
+  pendingAction?: string;
+  pendingEntityId?: string;
 }
 
 function parseJson<T>(raw: string): T | null {
@@ -167,8 +169,8 @@ export function useCredChain() {
   const { address } = useWallet();
   const [txState, setTxState] = useState<TxState>({ status: 'idle' });
 
-  const startTx = useCallback((msg: string) => {
-    setTxState({ status: 'pending', message: msg });
+  const startTx = useCallback((msg: string, action?: string, entityId?: string) => {
+    setTxState({ status: 'pending', message: msg, pendingAction: action, pendingEntityId: entityId });
   }, []);
 
   const succeedTx = useCallback((hash: string, msg: string) => {
@@ -379,23 +381,72 @@ export function useCredChain() {
 
     // 7. Wait for transaction receipt using custom polling to bypass genlayer-js localnet status bug
     let confirmed = false;
+    let lastLoggedStatus = '';
+    const statusNames: Record<number, string> = {
+      0: 'UNINITIALIZED',
+      1: 'PENDING',
+      2: 'PROPOSING',
+      3: 'COMMITTING',
+      4: 'REVEALING',
+      5: 'ACCEPTED',
+      6: 'UNDETERMINED',
+      7: 'FINALIZED',
+      8: 'CANCELED',
+      9: 'APPEAL_REVEALING',
+      10: 'APPEAL_COMMITTING',
+      11: 'READY_TO_FINALIZE',
+      12: 'VALIDATORS_TIMEOUT',
+      13: 'LEADER_TIMEOUT'
+    };
+
     for (let i = 0; i < 60; i++) {
       try {
         const tx = await readClient.getTransaction({ hash: txHash as any }) as any;
         if (tx) {
-          const status = Number(tx.status);
-          if (status === 1 || status === 2 || status === 5 || status === 7) {
+          const statusNum = Number(tx.status);
+          const statusStr = tx.statusName || tx.status_name || statusNames[statusNum] || String(statusNum);
+
+          if (statusStr !== lastLoggedStatus) {
+            console.log(`[UI Hook Poll] Tx status: ${statusStr}`);
+            lastLoggedStatus = statusStr;
+          }
+
+          // Fail immediately on terminal/error states
+          if (
+            statusNum === 8 || statusStr === 'CANCELED' ||
+            statusNum === 12 || statusStr === 'VALIDATORS_TIMEOUT' ||
+            statusNum === 13 || statusStr === 'LEADER_TIMEOUT' ||
+            statusNum === 6 || statusStr === 'UNDETERMINED'
+          ) {
+            throw new Error(`Transaction failed with status: ${statusStr}`);
+          }
+
+          // Update UI message depending on the status
+          if (statusNum === 5 || statusNum === 11 || statusStr === 'ACCEPTED' || statusStr === 'READY_TO_FINALIZE') {
+            setTxState(prev => ({
+              ...prev,
+              message: `Đồng thuận đã đạt (ACCEPTED)! Đang chờ hoàn thành (FINALIZED)...`
+            }));
+          } else if (statusNum === 7 || statusStr === 'FINALIZED') {
             confirmed = true;
             break;
+          } else {
+            setTxState(prev => ({
+              ...prev,
+              message: `Đang chờ validator đồng thuận (Trạng thái: ${statusStr})...`
+            }));
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.warn("Failed to get transaction status in hook", err);
+        if (err.message && err.message.includes('Transaction failed with status')) {
+          throw err;
+        }
       }
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
     if (!confirmed) {
-      throw new Error(`Timed out waiting for transaction ${txHash} to resolve.`);
+      throw new Error(`Timed out waiting for transaction ${txHash} to reach FINALIZED status.`);
     }
 
     return txHash;
@@ -408,7 +459,7 @@ export function useCredChain() {
     githubUrl: string,
     portfolioUrl: string,
   ): Promise<{ success: boolean; hash?: string; error?: string }> => {
-    startTx('Registering candidate on-chain...');
+    startTx('Registering candidate on-chain...', 'register');
     try {
       const hash = await sendWrite('register_candidate', [name, claimedSkills, githubUrl, portfolioUrl]);
       succeedTx(hash, 'Candidate registered successfully!');
@@ -420,7 +471,7 @@ export function useCredChain() {
   }, [startTx, succeedTx, failTx, sendWrite]);
 
   const stakeBond = useCallback(async (amount: number): Promise<{ success: boolean; hash?: string; error?: string }> => {
-    startTx(`Staking bond of ${amount} units...`);
+    startTx(`Staking bond of ${amount} units...`, 'stake');
     try {
       const hash = await sendWrite('stake_bond', [BigInt(amount)]);
       succeedTx(hash, `Bond of ${amount} units staked!`);
@@ -441,7 +492,7 @@ export function useCredChain() {
     stackoverflowId: string,
     cvUrl: string
   ): Promise<{ success: boolean; hash?: string; error?: string }> => {
-    startTx('Registering candidate profile on-chain...');
+    startTx('Registering candidate profile on-chain...', 'register');
     try {
       const hash = await sendWrite('register_candidate_extended', [
         name, claimedSkills, githubUrl, portfolioUrl,
@@ -457,7 +508,7 @@ export function useCredChain() {
 
   // ── stake ──────────────────────────────────────────────────────────────────
   const stake = useCallback(async (amount: number): Promise<{ success: boolean; hash?: string; error?: string }> => {
-    startTx(`Staking ${amount} GEN...`);
+    startTx(`Staking ${amount} GEN...`, 'stake');
     try {
       const hash = await sendWrite('stake', [BigInt(amount)], BigInt(amount));
       succeedTx(hash, `Successfully staked ${amount} GEN!`);
@@ -470,7 +521,7 @@ export function useCredChain() {
 
   // ── unstake ────────────────────────────────────────────────────────────────
   const unstake = useCallback(async (amount: number): Promise<{ success: boolean; hash?: string; error?: string }> => {
-    startTx(`Unstaking ${amount} GEN...`);
+    startTx(`Unstaking ${amount} GEN...`, 'unstake');
     try {
       const hash = await sendWrite('unstake', [BigInt(amount)]);
       succeedTx(hash, `Successfully unstaked ${amount} GEN!`);
@@ -483,7 +534,7 @@ export function useCredChain() {
 
   // ── generateInterviewQuestions ─────────────────────────────────────────────
   const generateInterviewQuestions = useCallback(async (candidateAddress: string): Promise<string | null> => {
-    startTx('AI generating technical interview questions... (30–60s)');
+    startTx('AI generating technical interview questions... (30–60s)', 'generate_questions');
     try {
       const hash = await sendWrite('generate_interview_questions', [toCalldataAddress(candidateAddress)]);
       succeedTx(hash, 'AI Interview questions generated!');
@@ -496,7 +547,7 @@ export function useCredChain() {
 
   // ── submitInterviewAnswers ─────────────────────────────────────────────────
   const submitInterviewAnswers = useCallback(async (candidateAddress: string, answers: string[]): Promise<string | null> => {
-    startTx('Submitting interview answers on-chain...');
+    startTx('Submitting interview answers on-chain...', 'submit_answers');
     try {
       const hash = await sendWrite('submit_interview_answers', [toCalldataAddress(candidateAddress), JSON.stringify(answers)]);
       succeedTx(hash, 'Interview answers submitted!');
@@ -509,7 +560,7 @@ export function useCredChain() {
 
   // ── gradeInterview ─────────────────────────────────────────────────────────
   const gradeInterview = useCallback(async (candidateAddress: string): Promise<string | null> => {
-    startTx('AI validators grading interview answers... (30–60s)');
+    startTx('AI validators grading interview answers... (30–60s)', 'grade_interview');
     try {
       const hash = await sendWrite('grade_interview', [toCalldataAddress(candidateAddress)]);
       succeedTx(hash, 'Interview graded!');
@@ -522,7 +573,7 @@ export function useCredChain() {
 
   // ── createJobBounty ────────────────────────────────────────────────────────
   const createJobBounty = useCallback(async (title: string, requiredSkills: string, bountyAmount: number): Promise<string | null> => {
-    startTx(`Creating job bounty and locking ${bountyAmount} GEN in escrow...`);
+    startTx(`Creating job bounty and locking ${bountyAmount} GEN in escrow...`, 'create_job');
     try {
       const hash = await sendWrite('create_job_bounty', [title, requiredSkills, BigInt(bountyAmount)], BigInt(bountyAmount));
       succeedTx(hash, 'Job bounty created and escrow locked successfully!');
@@ -535,7 +586,7 @@ export function useCredChain() {
 
   // ── cancelJobBounty ────────────────────────────────────────────────────────
   const cancelJobBounty = useCallback(async (jobId: string): Promise<string | null> => {
-    startTx('Cancelling job bounty and refunding escrow...');
+    startTx('Cancelling job bounty and refunding escrow...', 'cancel_job', jobId);
     try {
       const hash = await sendWrite('cancel_job_bounty', [BigInt(jobId)]);
       succeedTx(hash, 'Job bounty cancelled and refund processed!');
@@ -548,7 +599,7 @@ export function useCredChain() {
 
   // ── applyToJobBounty ───────────────────────────────────────────────────────
   const applyToJobBounty = useCallback(async (jobId: string): Promise<string | null> => {
-    startTx('Submitting job application...');
+    startTx('Submitting job application...', 'apply_job', jobId);
     try {
       const hash = await sendWrite('apply_to_job_bounty', [BigInt(jobId)]);
       succeedTx(hash, 'Successfully applied to job bounty!');
@@ -561,7 +612,7 @@ export function useCredChain() {
 
   // ── awardJobBounty ─────────────────────────────────────────────────────────
   const awardJobBounty = useCallback(async (jobId: string, winnerAddress: string): Promise<string | null> => {
-    startTx('Releasing job bounty escrow to candidate...');
+    startTx('Releasing job bounty escrow to candidate...', 'award_job', jobId);
     try {
       const hash = await sendWrite('award_job_bounty', [BigInt(jobId), toCalldataAddress(winnerAddress)]);
       succeedTx(hash, 'Job bounty awarded and escrow released!');
@@ -574,7 +625,7 @@ export function useCredChain() {
 
   // ── submitAppeal ───────────────────────────────────────────────────────────
   const submitAppeal = useCallback(async (reasoning: string): Promise<{ success: boolean; hash?: string; error?: string }> => {
-    startTx('Submitting appeal with 100 GEN fee...');
+    startTx('Submitting appeal with 100 GEN fee...', 'submit_appeal');
     try {
       const hash = await sendWrite('submit_appeal', [reasoning], 100n);
       succeedTx(hash, 'Appeal submitted successfully!');
@@ -587,7 +638,7 @@ export function useCredChain() {
 
   // ── executeAppeal ──────────────────────────────────────────────────────────
   const executeAppeal = useCallback(async (candidateAddress: string): Promise<string | null> => {
-    startTx('Supreme validators reviewing appeal evidence... (30–60s)');
+    startTx('Supreme validators reviewing appeal evidence... (30–60s)', 'execute_appeal');
     try {
       const hash = await sendWrite('execute_appeal', [toCalldataAddress(candidateAddress)]);
       succeedTx(hash, 'Appeal review complete!');
@@ -600,7 +651,7 @@ export function useCredChain() {
 
   // ── migrateCandidate ───────────────────────────────────────────────────────
   const migrateCandidate = useCallback(async (oldContractAddress: string): Promise<string | null> => {
-    startTx('Migrating candidate history from old contract...');
+    startTx('Migrating candidate history from old contract...', 'migrate_candidate');
     try {
       const hash = await sendWrite('migrate_candidate', [toCalldataAddress(oldContractAddress)]);
       succeedTx(hash, 'Candidate history migrated!');
@@ -622,7 +673,7 @@ export function useCredChain() {
       failTx(new Error('Invalid candidate address format (must be a valid 0x hex address)'));
       return null;
     }
-    startTx('Requesting AI verification of the candidate profile...');
+    startTx('Requesting AI verification of the candidate profile...', 'request_verification');
     try {
       const hash = await sendWrite('request_verification', [toCalldataAddress(trimmedAddr)]);
       const counter = await sendRead<bigint>('get_request_counter', []);
@@ -634,7 +685,7 @@ export function useCredChain() {
 
   // ── executeVerification ────────────────────────────────────────────────────
   const executeVerification = useCallback(async (requestId: string) => {
-    startTx('AI validators analyzing GitHub & portfolio... (30–60s)');
+    startTx('AI validators analyzing GitHub & portfolio... (30–60s)', 'execute_verification', requestId);
     try {
       const hash = await sendWrite('execute_verification', [requestId]);
       succeedTx(hash, 'AI verification complete! Fetching verdict...');

@@ -562,7 +562,7 @@ export function CandidatePage() {
                   style={{ width: '100%' }}
                   disabled={txState.status === 'pending'}
                 >
-                  {txState.status === 'pending' && activeTab === 'staking'
+                  {txState.status === 'pending' && txState.pendingAction === 'stake'
                     ? 'Đang chờ đồng thuận từ GenLayer validators...'
                     : 'Deposit Stake'
                   }
@@ -588,7 +588,7 @@ export function CandidatePage() {
                   style={{ width: '100%' }}
                   disabled={txState.status === 'pending' || stakeAmount <= 0}
                 >
-                  {txState.status === 'pending' && activeTab === 'staking'
+                  {txState.status === 'pending' && txState.pendingAction === 'unstake'
                     ? 'Đang chờ đồng thuận từ GenLayer validators...'
                     : 'Unstake GEN'
                   }
@@ -685,7 +685,7 @@ export function CandidatePage() {
                 onClick={handleGenerateQuestions}
                 disabled={txState.status === 'pending'}
               >
-                {txState.status === 'pending' && activeTab === 'interview'
+                {txState.status === 'pending' && txState.pendingAction === 'generate_questions'
                   ? 'Đang chờ đồng thuận từ GenLayer validators...'
                   : 'Generate AI Interview Questions'
                 }
@@ -730,7 +730,7 @@ export function CandidatePage() {
                   onClick={handleSubmitAnswers}
                   disabled={txState.status === 'pending' || answersInput.some(a => !a.trim())}
                 >
-                  {txState.status === 'pending' && activeTab === 'interview'
+                  {txState.status === 'pending' && txState.pendingAction === 'submit_answers'
                     ? 'Đang chờ đồng thuận từ GenLayer validators...'
                     : 'Submit Interview Answers'
                   }
@@ -750,7 +750,7 @@ export function CandidatePage() {
                 onClick={handleGradeInterview}
                 disabled={txState.status === 'pending'}
               >
-                {txState.status === 'pending' && activeTab === 'interview'
+                {txState.status === 'pending' && txState.pendingAction === 'grade_interview'
                   ? 'Đang chờ đồng thuận từ GenLayer validators...'
                   : 'Grade My Answers (Consensus Run)'
                 }
@@ -822,7 +822,7 @@ export function CandidatePage() {
                     onClick={handleExecuteAppeal}
                     disabled={txState.status === 'pending'}
                   >
-                    {txState.status === 'pending' && activeTab === 'appeal'
+                    {txState.status === 'pending' && txState.pendingAction === 'execute_appeal'
                       ? 'Đang chờ đồng thuận từ GenLayer validators...'
                       : 'Execute Appeal Verdict (Consensus Run)'
                     }
@@ -854,7 +854,10 @@ export function CandidatePage() {
                 style={{ width: '100%', background: 'linear-gradient(135deg, var(--red-500), #dc2626)', boxShadow: '0 2px 16px rgba(239, 68, 68, 0.35)' }}
                 disabled={txState.status === 'pending' || !appealReasoning.trim()}
               >
-                Submit Appeal (Pay 100 GEN)
+                {txState.status === 'pending' && txState.pendingAction === 'submit_appeal'
+                  ? 'Đang chờ đồng thuận từ GenLayer validators...'
+                  : 'Submit Appeal (Pay 100 GEN)'
+                }
               </button>
             </form>
           )}
