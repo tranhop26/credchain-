@@ -26,7 +26,7 @@ export function useWallet() {
 }
 
 const STUDIONET_CHAIN = {
-  chainId: '0xF23F', // 61999
+  chainId: '0xF22F', // 61999
   chainName: 'GenLayer Studionet',
   nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
   rpcUrls: ['https://studio.genlayer.com/api'],
@@ -37,14 +37,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [chainId, setChainId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const isCorrectNetwork = chainId === '0xF23F' || chainId === '0xf23f';
+  const isCorrectNetwork = chainId === '0xF22F' || chainId === '0xf22f';
 
   const checkNetworkAndConnect = useCallback(async (eth: any, forceSwitch = false) => {
     try {
       const currentChainId = await eth.request({ method: 'eth_chainId' });
       setChainId(currentChainId);
 
-      if (currentChainId !== '0xF23F' && currentChainId !== '0xf23f') {
+      if (currentChainId !== '0xF22F' && currentChainId !== '0xf22f') {
         if (forceSwitch) {
           try {
             await eth.request({
@@ -156,7 +156,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         // Re-check accounts when chain changes
         eth.request({ method: 'eth_accounts' })
           .then((accounts: string[]) => {
-            const isCorrect = newChainId === '0xF23F' || newChainId === '0xf23f';
+            const isCorrect = newChainId === '0xF22F' || newChainId === '0xf22f';
             if (accounts.length > 0 && isCorrect) {
               setAddress(accounts[0]);
               setError(null);

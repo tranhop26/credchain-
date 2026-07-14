@@ -7,7 +7,7 @@ import { isAddress } from 'viem';
 const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0xDfc880de4A0463e9E4368cE86Bd2C00BC4a0552f') as `0x${string}`;
 
 const STUDIONET_CHAIN = {
-  chainId: '0xF23F', // 61999
+  chainId: '0xF22F', // 61999
   chainName: 'GenLayer Studionet',
   nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
   rpcUrls: ['https://studio.genlayer.com/api'],
@@ -174,7 +174,7 @@ export function useCredChain() {
 
     console.log('[Diagnostic] Chain ID before switching/validation:', currentChainId);
 
-    const isTargetChain = currentChainId === '0xF23F' || currentChainId === '0xf23f';
+    const isTargetChain = currentChainId === '0xF22F' || currentChainId === '0xf22f';
     console.log('[Diagnostic] Is switch required?', !isTargetChain);
 
     // 2. Switch/add network only if not already on GenLayer Studionet
@@ -182,9 +182,9 @@ export function useCredChain() {
       try {
         await eth.request({
           method: 'wallet_switchEthereumChain',
-          params: [{ chainId: '0xF23F' }],
+          params: [{ chainId: '0xF22F' }],
         });
-        currentChainId = '0xF23F';
+        currentChainId = '0xF22F';
       } catch (switchErr: any) {
         console.error("CredChain transaction failure at wallet_switchEthereumChain", {
           error: switchErr,
@@ -205,7 +205,7 @@ export function useCredChain() {
               method: 'wallet_addEthereumChain',
               params: [STUDIONET_CHAIN],
             });
-            currentChainId = '0xF23F';
+            currentChainId = '0xF22F';
           } catch (addErr: any) {
             console.error("CredChain transaction failure at wallet_addEthereumChain", {
               error: addErr,
@@ -229,7 +229,7 @@ export function useCredChain() {
       try {
         const verifiedChainId = await eth.request({ method: 'eth_chainId' });
         console.log('[Diagnostic] Chain ID after switching:', verifiedChainId);
-        if (verifiedChainId !== '0xF23F' && verifiedChainId !== '0xf23f') {
+        if (verifiedChainId !== '0xF22F' && verifiedChainId !== '0xf22f') {
           throw new Error(`Chain switch was not successful. Current chain: ${verifiedChainId}`);
         }
       } catch (e: any) {
