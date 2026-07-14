@@ -8,6 +8,9 @@ interface CandidateFormProps {
     githubUrl: string;
     portfolioUrl: string;
     stakeAmount: number;
+    leetcodeUser: string;
+    stackoverflowId: string;
+    cvUrl: string;
   }) => Promise<void>;
   isLoading: boolean;
 }
@@ -18,6 +21,9 @@ export function CandidateForm({ onSubmit, isLoading }: CandidateFormProps) {
   const [skills, setSkills] = useState('');
   const [github, setGithub] = useState('');
   const [portfolio, setPortfolio] = useState('');
+  const [leetcodeUser, setLeetcodeUser] = useState('');
+  const [stackoverflowId, setStackoverflowId] = useState('');
+  const [cvUrl, setCvUrl] = useState('');
   const [stake, setStake] = useState('1000');
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -28,6 +34,9 @@ export function CandidateForm({ onSubmit, isLoading }: CandidateFormProps) {
       githubUrl: github,
       portfolioUrl: portfolio,
       stakeAmount: parseInt(stake) || 1000,
+      leetcodeUser,
+      stackoverflowId,
+      cvUrl,
     });
   };
 
@@ -83,6 +92,42 @@ export function CandidateForm({ onSubmit, isLoading }: CandidateFormProps) {
           placeholder="https://yourportfolio.dev"
           value={portfolio}
           onChange={e => setPortfolio(e.target.value)}
+        />
+      </div>
+
+      <div className="form-group">
+        <label className="form-label" htmlFor="field-leetcode">LeetCode Username (optional)</label>
+        <input
+          id="field-leetcode"
+          className="form-input"
+          type="text"
+          placeholder="your_leetcode_handle"
+          value={leetcodeUser}
+          onChange={e => setLeetcodeUser(e.target.value)}
+        />
+      </div>
+
+      <div className="form-group">
+        <label className="form-label" htmlFor="field-stackoverflow">StackOverflow ID (optional)</label>
+        <input
+          id="field-stackoverflow"
+          className="form-input"
+          type="text"
+          placeholder="1234567"
+          value={stackoverflowId}
+          onChange={e => setStackoverflowId(e.target.value)}
+        />
+      </div>
+
+      <div className="form-group">
+        <label className="form-label" htmlFor="field-cv">CV Link (optional)</label>
+        <input
+          id="field-cv"
+          className="form-input"
+          type="url"
+          placeholder="https://yourwebsite.com/resume.pdf"
+          value={cvUrl}
+          onChange={e => setCvUrl(e.target.value)}
         />
       </div>
 

@@ -2,6 +2,7 @@
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 from genlayer import *
 import json
+
 def robust_json_loads(s) -> dict:
     if isinstance(s, dict):
         return s
@@ -22,13 +23,11 @@ def robust_json_loads(s) -> dict:
         pass
         
     try:
-        # A. Clean trailing commas in arrays/objects: ", ]" or ",]" -> "]"
         cleaned = s_clean
         for _ in range(10):
             cleaned = cleaned.replace(", ]", "]").replace(",]", "]")
             cleaned = cleaned.replace(", }", "}").replace(",}", "}")
             
-        # B. Insert missing commas before key-value keys
         keys = ["verdict", "confidence", "verified_skills", "unverified_skills", "reasoning", "fraud_detected", "agree"]
         for k in keys:
             key_str = '"' + k + '"'
@@ -135,31 +134,36 @@ def robust_json_loads(s) -> dict:
     
     return res
 
-# =============================================================================
-# CredChain — Decentralized CV Verification & Hiring Bond Platform
-# =============================================================================
-# Phase 5: Add semantic validator cross-check in validator_fn.
-#
-# This is the key differentiator for scoring Trục 2 (Contract Quality 4-5/5):
-# Validators do NOT just check JSON schema — they run a second independent
-# exec_prompt to verify the MEANING of the verdict. Two AI validators must
-# agree that the verdict logically follows from the evidence, within 1 tier
-# of difference. UNVERIFIED vs VERIFIED = consensus fail → tx rejected.
-# =============================================================================
-
 
 class Contract(gl.Contract):
-    candidates: TreeMap[str, str]             # address → JSON candidate profile
-    stakes: TreeMap[str, u256]                # address → staked amount
-    verifications: TreeMap[str, str]          # address → JSON verification result
-    blacklist: TreeMap[str, bool]             # address → True if slashed
-    verification_requests: TreeMap[str, str]  # request_id → JSON request metadata
+    candidates: TreeMap[str, str]             # Address str -> JSON candidate profile (name, claimed_skills, github_url, portfolio_url, leetcode_user, stackoverflow_id, cv_url, registered_at, status)
+    stakes: TreeMap[str, u256]                # Address str -> staked GEN (compat with legacy tests)
+    verifications: TreeMap[str, str]          # Address str -> JSON verification result
+    blacklist: TreeMap[str, bool]             # Address str -> True if slashed
+    verification_requests: TreeMap[str, str]  # request_id -> JSON request metadata
     request_counter: u256                     # auto-increment ID
+    
+    # v2 variables
+    reputation_scores: TreeMap[str, u256]     # Address str -> reputation score (0-100)
+    staked_amount: TreeMap[str, u256]         # Address str -> staked GEN amount
+    candidate_tier: TreeMap[str, str]          # Address str -> "BRONZE|SILVER|GOLD|PLATINUM"
+    
+    interview_questions: TreeMap[str, str]    # Address str -> JSON list of questions
+    interview_answers: TreeMap[str, str]      # Address str -> JSON list of answers
+    interview_score: TreeMap[str, u256]       # Address str -> score (0-100)
+    interview_status: TreeMap[str, str]       # Address str -> "NOT_STARTED|GENERATED|ANSWERED|GRADED"
+    
+    bounty_counter: u256                      # auto-increment ID for job bounties
+    job_bounties: TreeMap[u256, str]          # job_id -> JSON job info (title, employer, bounty_amount, status)
+    job_escrow: TreeMap[u256, u256]           # job_id -> escrowed bounty GEN amount
+    job_applicants: TreeMap[u256, str]        # job_id -> JSON list of applicant addresses
+    
+    appeals: TreeMap[str, str]                # Address str -> JSON appeal data (reasoning, fee_paid, status)
+    appeal_used: TreeMap[str, bool]           # Address str -> True if appeal already used
 
     def __init__(self):
-        # RULE #2: Only primitive types initialized here.
-        # TreeMap auto-initialized empty by GenVM — do NOT call TreeMap().
         self.request_counter = u256(0)
+        self.bounty_counter = u256(0)
 
     @gl.public.write
     def register_candidate(
@@ -169,27 +173,96 @@ class Contract(gl.Contract):
         github_url: str,
         portfolio_url: str
     ) -> None:
-        """Register a candidate profile on-chain."""
+        """Legacy registration mapping to extended registration."""
+        self.register_candidate_extended(name, claimed_skills, github_url, portfolio_url, "", "", "")
+
+    @gl.public.write
+    def register_candidate_extended(
+        self,
+        name: str,
+        claimed_skills: str,
+        github_url: str,
+        portfolio_url: str,
+        leetcode_user: str,
+        stackoverflow_id: str,
+        cv_url: str
+    ) -> None:
+        """Register a candidate profile supporting multi-platform credentials."""
         caller = str(gl.message.sender_address)
-        if caller in self.blacklist and self.blacklist[caller]:
+        if self.blacklist.get(caller, False):
             raise Exception("Caller is blacklisted and cannot re-register")
+        
         profile = {
-            "name": name, "claimed_skills": claimed_skills,
-            "github_url": github_url, "portfolio_url": portfolio_url,
-            "registered_at": 0, "status": "PENDING"
+            "name": name,
+            "claimed_skills": claimed_skills,
+            "github_url": github_url,
+            "portfolio_url": portfolio_url,
+            "leetcode_user": leetcode_user,
+            "stackoverflow_id": stackoverflow_id,
+            "cv_url": cv_url,
+            "registered_at": 0,
+            "status": "PENDING"
         }
         self.candidates[caller] = json.dumps(profile)
+        
+        if caller not in self.candidate_tier:
+            self.candidate_tier[caller] = "BRONZE"
+        if caller not in self.reputation_scores:
+            self.reputation_scores[caller] = u256(0)
+        if caller not in self.interview_status:
+            self.interview_status[caller] = "NOT_STARTED"
 
     @gl.public.write
     def stake_bond(self, amount: u256) -> None:
-        """Stake a reputation bond. Slashed if fraud detected."""
+        """Legacy staking method mapped to stake."""
+        self.stake(amount)
+
+    @gl.public.write
+    def stake(self, amount: u256) -> None:
+        """Stake native tokens to secure reputation tier."""
         caller = str(gl.message.sender_address)
         if caller not in self.candidates:
             raise Exception("Must register as candidate before staking")
         if self.blacklist.get(caller, False):
             raise Exception("Blacklisted candidates cannot stake")
-        existing = self.stakes.get(caller, u256(0))
-        self.stakes[caller] = existing + amount
+        
+        existing = self.staked_amount.get(caller, u256(0))
+        new_amount = existing + amount
+        self.staked_amount[caller] = new_amount
+        self.stakes[caller] = new_amount
+        
+        self._update_tier(caller)
+
+    @gl.public.write
+    def unstake(self, amount: u256) -> None:
+        """Unstake native tokens, downgrading tier if criteria not met."""
+        caller = str(gl.message.sender_address)
+        if caller not in self.candidates:
+            raise Exception("Must register as candidate before unstaking")
+        existing = self.staked_amount.get(caller, u256(0))
+        if existing < amount:
+            raise Exception("Insufficient staked balance to unstake")
+        
+        new_amount = existing - amount
+        self.staked_amount[caller] = new_amount
+        self.stakes[caller] = new_amount
+        
+        self._update_tier(caller)
+
+    def _update_tier(self, candidate_address: str) -> None:
+        stake_val = int(self.staked_amount.get(candidate_address, u256(0)))
+        rep_val = int(self.reputation_scores.get(candidate_address, u256(0)))
+        
+        if stake_val >= 5000 and rep_val >= 85:
+            self.candidate_tier[candidate_address] = "PLATINUM"
+        elif stake_val >= 2000 and rep_val >= 70:
+            self.candidate_tier[candidate_address] = "GOLD"
+        elif stake_val >= 1000 and rep_val >= 50:
+            self.candidate_tier[candidate_address] = "SILVER"
+        elif stake_val >= 500:
+            self.candidate_tier[candidate_address] = "BRONZE"
+        else:
+            self.candidate_tier[candidate_address] = "NONE"
 
     @gl.public.write
     def request_verification(self, candidate_address: Address) -> str:
@@ -202,6 +275,7 @@ class Contract(gl.Contract):
             raise Exception("Candidate not registered")
         if self.blacklist.get(candidate_addr_str, False):
             raise Exception("Candidate is blacklisted")
+            
         request_id = str(int(self.request_counter))
         self.request_counter = self.request_counter + u256(1)
         request_data = {
@@ -214,16 +288,9 @@ class Contract(gl.Contract):
         self.verification_requests[request_id] = json.dumps(request_data)
         return request_id
 
-
     @gl.public.write
     def execute_verification(self, request_id: str) -> None:
-        """
-        Core AI verification. RULE #7: ALL gl.nondet.* inside run_nondet_unsafe.
-
-        leader_fn:    web.render (GitHub + portfolio) → exec_prompt → verdict JSON
-        validator_fn: schema check + semantic cross-check via second exec_prompt
-                      Validators check MEANING not just format (Trục 2 differentiator)
-        """
+        """Consensus AI validation of evidence sources."""
         request_id_str = str(request_id)
         if request_id_str not in self.verification_requests:
             raise Exception("Request not found: " + request_id_str)
@@ -237,7 +304,7 @@ class Contract(gl.Contract):
         if self.blacklist.get(candidate_address, False):
             raise Exception("Candidate is blacklisted")
 
-        stake_amount = self.stakes.get(candidate_address, u256(0))
+        stake_amount = self.staked_amount.get(candidate_address, u256(0))
         if stake_amount == u256(0):
             raise Exception("Insufficient bond: candidate must stake before verification.")
 
@@ -246,9 +313,6 @@ class Contract(gl.Contract):
         portfolio_url = candidate.get("portfolio_url", "")
         claimed_skills = candidate["claimed_skills"]
 
-        # =====================================================================
-        # LEADER FUNCTION — runs on the leader validator node
-        # =====================================================================
         def leader_fn():
             github_content = ""
             github_readable = True
@@ -282,7 +346,7 @@ class Contract(gl.Contract):
                     "unverified_skills": [s.strip() for s in claimed_skills.split(",")],
                     "reasoning": "All evidence sources were inaccessible. Cannot verify skills without evidence.",
                     "fraud_detected": False,
-                    "evidence_note": "auto_unverified_no_sources"
+                    "agree": True
                 })
 
             analysis_task = f"""You are a senior technical HR verification expert.
@@ -311,13 +375,8 @@ Respond with ONLY a JSON object (no markdown):
   "reasoning": "<2-3 sentences citing specific evidence>",
   "fraud_detected": <true or false>
 }}"""
-
             return gl.nondet.exec_prompt(analysis_task, response_format="json")
 
-        # =====================================================================
-        # VALIDATOR FUNCTION — semantic cross-check (not just schema)
-        # This is the Trục 2 differentiator: validators check MEANING
-        # =====================================================================
         def validator_fn(leader_result) -> bool:
             try:
                 try:
@@ -325,25 +384,23 @@ Respond with ONLY a JSON object (no markdown):
                 except Exception:
                     raw = leader_result
                 data = robust_json_loads(raw)
-                
-                # Schema validation
                 if data.get("verdict") not in {"VERIFIED", "PARTIAL", "UNVERIFIED"}:
-                    return True
+                    return False
                 confidence = data.get("confidence", -1)
                 if not isinstance(confidence, int) or not (0 <= confidence <= 100):
-                    return True
+                    return False
                 if not isinstance(data.get("verified_skills"), list):
-                    return True
+                    return False
                 if not isinstance(data.get("unverified_skills"), list):
-                    return True
+                    return False
                 if not isinstance(data.get("fraud_detected"), bool):
-                    return True
+                    return False
                 reasoning = data.get("reasoning", "")
                 if not isinstance(reasoning, str) or len(reasoning.strip()) < 10:
-                    return True
+                    return False
+                return True
             except Exception:
-                pass
-            return True
+                return False
 
         result_raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
         result_data = robust_json_loads(result_raw)
@@ -364,10 +421,341 @@ Respond with ONLY a JSON object (no markdown):
 
         if result_data.get("fraud_detected", False):
             self.blacklist[candidate_address] = True
+            self.staked_amount[candidate_address] = u256(0)
             self.stakes[candidate_address] = u256(0)
             cand_obj = json.loads(self.candidates[candidate_address])
             cand_obj["status"] = "BLACKLISTED"
             self.candidates[candidate_address] = json.dumps(cand_obj)
+            self._update_tier(candidate_address)
+
+    @gl.public.write
+    def generate_interview_questions(self, candidate_address: Address) -> None:
+        """Generate 3 technical questions based on skills."""
+        cand_addr_str = str(candidate_address)
+        if cand_addr_str not in self.candidates:
+            raise Exception("Candidate not registered")
+        
+        status = self.interview_status.get(cand_addr_str, "NOT_STARTED")
+        if status != "NOT_STARTED":
+            raise Exception("Interview already started or questions generated")
+            
+        candidate_data = json.loads(self.candidates[cand_addr_str])
+        claimed_skills = candidate_data["claimed_skills"]
+        
+        def leader_fn():
+            prompt = f"""You are a technical interviewer. Generate 3 distinct technical interview questions to test the candidate's claimed skills: {claimed_skills}.
+Respond with ONLY a JSON object containing a list of strings:
+{{
+  "questions": [
+    "Question 1...",
+    "Question 2...",
+    "Question 3..."
+  ]
+}}"""
+            return gl.nondet.exec_prompt(prompt, response_format="json")
+
+        def validator_fn(leader_result) -> bool:
+            try:
+                try:
+                    raw = leader_result.value
+                except Exception:
+                    raw = leader_result
+                data = robust_json_loads(raw)
+                questions = data.get("questions")
+                if not isinstance(questions, list) or len(questions) != 3:
+                    return False
+                for q in questions:
+                    if not isinstance(q, str) or len(q.strip()) < 10:
+                        return False
+                return True
+            except Exception:
+                return False
+
+        result_raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+        result_data = robust_json_loads(result_raw)
+        
+        self.interview_questions[cand_addr_str] = json.dumps(result_data["questions"])
+        self.interview_status[cand_addr_str] = "GENERATED"
+
+    @gl.public.write
+    def submit_interview_answers(self, candidate_address: Address, answers_list: str) -> None:
+        """Submit candidate answers."""
+        caller = gl.message.sender_address
+        if caller != candidate_address:
+            raise Exception("NOT_AUTHORIZED: Only the candidate can submit their answers")
+        
+        cand_addr_str = str(candidate_address)
+        status = self.interview_status.get(cand_addr_str, "NOT_STARTED")
+        if status != "GENERATED":
+            raise Exception("Interview answers cannot be submitted in status: " + status)
+            
+        answers = json.loads(answers_list)
+        if not isinstance(answers, list) or len(answers) != 3:
+            raise Exception("Invalid answers format: must be a list of 3 answers")
+            
+        self.interview_answers[cand_addr_str] = json.dumps(answers)
+        self.interview_status[cand_addr_str] = "ANSWERED"
+
+    @gl.public.write
+    def grade_interview(self, candidate_address: Address) -> None:
+        """Grade the submitted answers with validator score validation."""
+        cand_addr_str = str(candidate_address)
+        status = self.interview_status.get(cand_addr_str, "NOT_STARTED")
+        if status != "ANSWERED":
+            raise Exception("Interview has not been answered yet")
+            
+        questions_raw = self.interview_questions[cand_addr_str]
+        answers_raw = self.interview_answers[cand_addr_str]
+        
+        def leader_fn():
+            prompt = f"""You are a technical examiner. Grade the candidate's answers to the interview questions.
+QUESTIONS: {questions_raw}
+ANSWERS: {answers_raw}
+
+Respond with ONLY a JSON object containing:
+{{
+  "score": <integer 0-100>,
+  "feedback": "<2-3 sentences explaining the grade>"
+}}"""
+            return gl.nondet.exec_prompt(prompt, response_format="json")
+
+        def validator_fn(leader_result) -> bool:
+            try:
+                try:
+                    raw = leader_result.value
+                except Exception:
+                    raw = leader_result
+                data = robust_json_loads(raw)
+                leader_score = data.get("score")
+                if not isinstance(leader_score, int) or not (0 <= leader_score <= 100):
+                    return False
+                
+                prompt = f"""You are a technical examiner. Grade the candidate's answers to the interview questions.
+QUESTIONS: {questions_raw}
+ANSWERS: {answers_raw}
+
+Respond with ONLY a JSON object containing:
+{{
+  "score": <integer 0-100>,
+  "feedback": "<2-3 sentences explaining the grade>"
+}}"""
+                val_raw = gl.nondet.exec_prompt(prompt, response_format="json")
+                val_data = robust_json_loads(val_raw)
+                val_score = val_data.get("score")
+                
+                if not isinstance(val_score, int) or not (0 <= val_score <= 100):
+                    return False
+                
+                if abs(val_score - leader_score) > 10:
+                    return False
+                return True
+            except Exception:
+                return False
+
+        result_raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+        result_data = robust_json_loads(result_raw)
+        
+        score_val = u256(result_data["score"])
+        self.interview_score[cand_addr_str] = score_val
+        self.interview_status[cand_addr_str] = "GRADED"
+        
+        self.reputation_scores[cand_addr_str] = score_val
+        self._update_tier(cand_addr_str)
+
+    @gl.public.write
+    def create_job_bounty(self, title: str, required_skills: str, bounty_amount: u256) -> u256:
+        """Create a job bounty and hold locked escrow funds."""
+        employer = str(gl.message.sender_address)
+        job_id = self.bounty_counter
+        self.bounty_counter = self.bounty_counter + u256(1)
+        
+        bounty_val = gl.message.value if gl.message.value > u256(0) else bounty_amount
+        
+        job_data = {
+            "id": int(job_id),
+            "employer": employer,
+            "title": title,
+            "required_skills": required_skills,
+            "bounty_amount": int(bounty_val),
+            "status": "OPEN"
+        }
+        self.job_bounties[job_id] = json.dumps(job_data)
+        self.job_escrow[job_id] = bounty_val
+        self.job_applicants[job_id] = json.dumps([])
+        
+        return job_id
+
+    @gl.public.write
+    def cancel_job_bounty(self, job_id: u256) -> None:
+        """Refund employer if job bounty remains OPEN."""
+        if job_id not in self.job_bounties:
+            raise Exception("Job bounty not found")
+        job = json.loads(self.job_bounties[job_id])
+        employer = job["employer"]
+        
+        if str(gl.message.sender_address) != employer:
+            raise Exception("NOT_AUTHORIZED: Only the job creator can cancel this bounty")
+        if job["status"] != "OPEN":
+            raise Exception("Job is not open and cannot be cancelled")
+            
+        escrow = self.job_escrow.get(job_id, u256(0))
+        if escrow > u256(0):
+            gl.send(gl.message.sender_address, escrow)
+            
+        job["status"] = "CANCELLED"
+        self.job_bounties[job_id] = json.dumps(job)
+        self.job_escrow[job_id] = u256(0)
+
+    @gl.public.write
+    def apply_to_job_bounty(self, job_id: u256) -> None:
+        """Apply as a registered candidate."""
+        caller = str(gl.message.sender_address)
+        if caller not in self.candidates:
+            raise Exception("NOT_AUTHORIZED: Must register as candidate to apply")
+            
+        if job_id not in self.job_bounties:
+            raise Exception("Job bounty not found")
+        job = json.loads(self.job_bounties[job_id])
+        if job["status"] != "OPEN":
+            raise Exception("Job is not open for applications")
+            
+        applicants = json.loads(self.job_applicants.get(job_id, "[]"))
+        if caller in applicants:
+            raise Exception("ALREADY_APPLIED: You have already applied to this job")
+            
+        applicants.append(caller)
+        self.job_applicants[job_id] = json.dumps(applicants)
+
+    @gl.public.write
+    def award_job_bounty(self, job_id: u256, winner_address: Address) -> None:
+        """Employer releases job escrow to the winner."""
+        if job_id not in self.job_bounties:
+            raise Exception("Job bounty not found")
+        job = json.loads(self.job_bounties[job_id])
+        employer = job["employer"]
+        
+        if str(gl.message.sender_address) != employer:
+            raise Exception("NOT_AUTHORIZED: Only the job creator can award this bounty")
+        if job["status"] != "OPEN":
+            raise Exception("Job is not open")
+            
+        winner_str = str(winner_address)
+        applicants = json.loads(self.job_applicants.get(job_id, "[]"))
+        if winner_str not in applicants:
+            raise Exception("INVALID_WINNER: Winner must be one of the job applicants")
+            
+        escrow = self.job_escrow.get(job_id, u256(0))
+        if escrow > u256(0):
+            gl.send(winner_address, escrow)
+            
+        job["status"] = "CLOSED"
+        self.job_bounties[job_id] = json.dumps(job)
+        self.job_escrow[job_id] = u256(0)
+
+    @gl.public.write
+    def submit_appeal(self, reasoning: str) -> None:
+        """Submit an appeal against slash/unverified verdict."""
+        caller = str(gl.message.sender_address)
+        if caller not in self.candidates:
+            raise Exception("Must be registered candidate to appeal")
+        if self.appeal_used.get(caller, False):
+            raise Exception("APPEAL_ALREADY_USED: You can only appeal once per candidate")
+            
+        appeal_data = {
+            "reasoning": reasoning,
+            "fee_paid": 100,
+            "status": "PENDING"
+        }
+        self.appeals[caller] = json.dumps(appeal_data)
+        self.appeal_used[caller] = True
+
+    @gl.public.write
+    def execute_appeal(self, candidate_address: Address) -> None:
+        """Consensus execution of an appeal verdict."""
+        cand_str = str(candidate_address)
+        if cand_str not in self.appeals:
+            raise Exception("Appeal not found")
+        appeal = json.loads(self.appeals[cand_str])
+        if appeal["status"] != "PENDING":
+            raise Exception("Appeal already processed")
+            
+        candidate = json.loads(self.candidates[cand_str])
+        github_url = candidate["github_url"]
+        portfolio_url = candidate.get("portfolio_url", "")
+        claimed_skills = candidate["claimed_skills"]
+        appeal_reason = appeal["reasoning"]
+
+        def leader_fn():
+            github_content = ""
+            try:
+                github_content = gl.nondet.web.render(github_url, mode="text")
+            except Exception:
+                github_content = "GITHUB_UNREADABLE"
+
+            analysis_task = f"""You are a supreme tech credential appeal judge.
+The candidate's profile was flagged as fraud or unverified, but they appealed.
+CLAIMED SKILLS: {claimed_skills}
+GITHUB CONTENT: {github_content[:2000]}
+CANDIDATE APPEAL REASONING: {appeal_reason}
+
+Respond with ONLY a JSON object (no markdown):
+{{
+  "verdict": "VERIFIED" or "PARTIAL" or "UNVERIFIED",
+  "reasoning": "<2-3 sentences justifying the decision>"
+}}"""
+            return gl.nondet.exec_prompt(analysis_task, response_format="json")
+
+        def validator_fn(leader_result) -> bool:
+            try:
+                try:
+                    raw = leader_result.value
+                except Exception:
+                    raw = leader_result
+                data = robust_json_loads(raw)
+                if data.get("verdict") not in {"VERIFIED", "PARTIAL", "UNVERIFIED"}:
+                    return False
+                return True
+            except Exception:
+                return False
+
+        result_raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+        result_data = robust_json_loads(result_raw)
+        
+        verdict = result_data["verdict"]
+        
+        if verdict in ["VERIFIED", "PARTIAL"]:
+            self.stakes[cand_str] = u256(1000)
+            self.staked_amount[cand_str] = u256(1000)
+            self.blacklist[cand_str] = False
+            
+            candidate["status"] = verdict
+            self.candidates[cand_str] = json.dumps(candidate)
+            
+            gl.send(candidate_address, u256(100))
+            appeal["status"] = "WON"
+        else:
+            appeal["status"] = "LOST"
+            
+        self.appeals[cand_str] = json.dumps(appeal)
+
+    @gl.public.write
+    def migrate_candidate(self, old_contract_address: Address) -> None:
+        """Fallback migration function to onboard old candidates."""
+        caller = str(gl.message.sender_address)
+        if caller not in self.candidates:
+            profile = {
+                "name": "Migrated Candidate",
+                "claimed_skills": "",
+                "github_url": "",
+                "portfolio_url": "",
+                "leetcode_user": "",
+                "stackoverflow_id": "",
+                "cv_url": "",
+                "registered_at": 0,
+                "status": "PENDING"
+            }
+            self.candidates[caller] = json.dumps(profile)
+            self.candidate_tier[caller] = "BRONZE"
 
     @gl.public.view
     def get_candidate_profile(self, address: Address) -> str:
@@ -390,10 +778,53 @@ Respond with ONLY a JSON object (no markdown):
     @gl.public.view
     def get_stake(self, address: Address) -> u256:
         addr_str = str(address)
-        return self.stakes.get(addr_str, u256(0))
+        return self.staked_amount.get(addr_str, u256(0))
 
     @gl.public.view
     def is_blacklisted(self, address: Address) -> bool:
         addr_str = str(address)
         return self.blacklist.get(addr_str, False)
 
+    @gl.public.view
+    def get_reputation_score(self, address: Address) -> u256:
+        return self.reputation_scores.get(str(address), u256(0))
+
+    @gl.public.view
+    def get_candidate_tier(self, address: Address) -> str:
+        return self.candidate_tier.get(str(address), "NONE")
+
+    @gl.public.view
+    def get_interview_questions(self, address: Address) -> str:
+        return self.interview_questions.get(str(address), "")
+
+    @gl.public.view
+    def get_interview_answers(self, address: Address) -> str:
+        return self.interview_answers.get(str(address), "")
+
+    @gl.public.view
+    def get_interview_score(self, address: Address) -> u256:
+        return self.interview_score.get(str(address), u256(0))
+
+    @gl.public.view
+    def get_interview_status(self, address: Address) -> str:
+        return self.interview_status.get(str(address), "NOT_STARTED")
+
+    @gl.public.view
+    def get_job_bounty(self, job_id: u256) -> str:
+        return self.job_bounties.get(job_id, "")
+
+    @gl.public.view
+    def get_job_escrow(self, job_id: u256) -> u256:
+        return self.job_escrow.get(job_id, u256(0))
+
+    @gl.public.view
+    def get_job_applicants(self, job_id: u256) -> str:
+        return self.job_applicants.get(job_id, "")
+
+    @gl.public.view
+    def get_appeal(self, address: Address) -> str:
+        return self.appeals.get(str(address), "")
+
+    @gl.public.view
+    def get_appeal_used(self, address: Address) -> bool:
+        return self.appeal_used.get(str(address), False)

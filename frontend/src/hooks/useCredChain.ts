@@ -5,7 +5,7 @@ import { useState, useCallback } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { isAddress, fromHex } from 'viem';
 
-const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0xDfc880de4A0463e9E4368cE86Bd2C00BC4a0552f') as `0x${string}`;
+const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0xd3577B8b3aE3455BA7E181C875DC40B3abb1b135') as `0x${string}`;
 
 function toCalldataAddress(addr: string): CalldataAddress {
   const clean = addr.toLowerCase().trim();
@@ -31,6 +31,9 @@ export interface CandidateProfile {
   claimed_skills: string;
   github_url: string;
   portfolio_url: string;
+  leetcode_user?: string;
+  stackoverflow_id?: string;
+  cv_url?: string;
   registered_at: number;
   status: 'PENDING' | 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED' | 'BLACKLISTED';
 }
@@ -93,23 +96,49 @@ function extractErrorMessage(error: unknown): string {
 function friendlyError(e: unknown): string {
   console.error('[Raw Error Diagnostics]', e);
 
-  if (e instanceof Error || (e && typeof e === 'object')) {
-    const err = e as any;
-    const msg = err.message || '';
+  const realMsg = extractErrorMessage(e);
+  const msgLower = realMsg.toLowerCase();
 
-    if (msg === 'Please connect your wallet first') {
-      return msg;
-    }
-
-    if (msg.includes('Insufficient bond')) return 'You must stake a bond before requesting verification.';
-    if (msg.includes('blacklisted')) return 'This candidate is blacklisted and cannot be verified.';
-    if (msg.includes('not registered')) return 'This address is not registered as a candidate.';
-    if (msg.includes('already completed')) return 'This verification request has already been processed.';
-    if (msg.includes('not found')) return 'Verification request not found. Check the request ID.';
-    if (msg.includes('CONTRACT_ADDRESS')) return 'Contract address not configured.';
+  if (msgLower.includes('please connect your wallet first')) {
+    return 'Please connect your wallet first';
+  }
+  if (msgLower.includes('insufficient bond')) {
+    return 'You must stake a bond before requesting verification.';
+  }
+  if (msgLower.includes('blacklisted')) {
+    return 'This candidate is blacklisted and cannot perform this action.';
+  }
+  if (msgLower.includes('not registered') || msgLower.includes('not_registered')) {
+    return 'This address is not registered as a candidate.';
+  }
+  if (msgLower.includes('already completed')) {
+    return 'This verification request has already been processed.';
+  }
+  if (msgLower.includes('not found')) {
+    return 'Request or resource not found.';
+  }
+  if (msgLower.includes('contract_address')) {
+    return 'Contract address not configured.';
+  }
+  if (msgLower.includes('not_authorized') || msgLower.includes('not authorized')) {
+    return 'Action not authorized. Only the owner or designated address can execute this.';
+  }
+  if (msgLower.includes('already_applied') || msgLower.includes('already applied')) {
+    return 'You have already applied to this job bounty.';
+  }
+  if (msgLower.includes('appeal_already_used') || msgLower.includes('appeal already used')) {
+    return 'You have already used your single appeal allocation.';
+  }
+  if (msgLower.includes('invalid_winner') || msgLower.includes('invalid winner')) {
+    return 'Winner must be selected from the applicants list.';
+  }
+  if (msgLower.includes('job is not open') || msgLower.includes('job_not_open')) {
+    return 'This job bounty is not currently open.';
+  }
+  if (msgLower.includes('insufficient staked balance') || msgLower.includes('insufficient balance')) {
+    return 'Insufficient staked GEN balance to execute unstake.';
   }
 
-  const realMsg = extractErrorMessage(e);
   return realMsg.length > 200 ? realMsg.slice(0, 200) + '...' : realMsg;
 }
 
@@ -155,7 +184,7 @@ export function useCredChain() {
   }, []);
 
   // Write via MetaMask (window.ethereum)
-  const sendWrite = useCallback(async (fnName: string, args: unknown[]): Promise<string> => {
+  const sendWrite = useCallback(async (fnName: string, args: unknown[], value: bigint = 0n): Promise<string> => {
     const eth = (window as any).ethereum;
     if (!eth) throw new Error('Please connect your wallet first');
 
@@ -273,11 +302,10 @@ export function useCredChain() {
     }
 
     const activeAddress = accounts[0] as `0x${string}`;
-    if (!activeAddress || !isAddress(activeAddress)) {
+    if (!isAddress(activeAddress)) {
       throw new Error(`Invalid active wallet address: ${String(activeAddress)}`);
     }
 
-    // Log active address right before createClient
     console.log('[Diagnostic] Active wallet address before client setup:', activeAddress);
 
     // 4. Create the write client with BOTH active account and provider
@@ -303,22 +331,19 @@ export function useCredChain() {
       throw e;
     }
 
-    // 5. Diagnostics details immediately before writeContract
     console.log('[Diagnostic] Active Account:', activeAddress);
     console.log('[Diagnostic] Contract Address:', CONTRACT_ADDRESS);
     console.log('[Diagnostic] Function Name:', fnName);
     console.log('[Diagnostic] Exact Arguments:', args);
-    console.log('[Diagnostic] Target Chain ID: 0xf23f');
-    console.log('[Diagnostic] Connected Network: studionet');
 
-    // 6. Execute writeContract (DO NOT call connect("studionet"))
+    // 5. Execute writeContract
     let txHashResult: any;
     try {
       txHashResult = await writeClient.writeContract({
         address: CONTRACT_ADDRESS,
         functionName: fnName,
         args: args as any[],
-        value: 0n,
+        value: value,
       });
     } catch (e: any) {
       console.error("CredChain transaction failure at client.writeContract", {
@@ -337,7 +362,7 @@ export function useCredChain() {
 
     console.log('[Diagnostic] writeContract raw result:', txHashResult);
 
-    // 7. Extract the transaction hash structure safely
+    // 6. Extract transaction hash
     let txHash: string;
     if (typeof txHashResult === 'string') {
       txHash = txHashResult;
@@ -351,9 +376,8 @@ export function useCredChain() {
     }
 
     console.log('[Diagnostic] Extracted Tx Hash:', txHash);
-    console.log('[Diagnostic] writeContract transaction hash:', txHash);
 
-    // 8. Wait for transaction receipt (waiting for ACCEPTED or FINALIZED status)
+    // 7. Wait for transaction receipt
     try {
       await readClient.waitForTransactionReceipt({
         hash: txHash as any,
@@ -374,7 +398,6 @@ export function useCredChain() {
         stack: e?.stack,
       });
 
-      // On timeout, query status and accept if ACCEPTED or FINALIZED
       try {
         const receipt = await readClient.getTransactionReceipt({ hash: txHash as any }) as any;
         console.log('[Diagnostic] Timeout fallback receipt:', receipt);
@@ -391,7 +414,7 @@ export function useCredChain() {
     return txHash;
   }, []);
 
-  // ── registerCandidate ──────────────────────────────────────────────────────
+  // ── Legacy Register / Stake ───────────────────────────────────────────────
   const registerCandidate = useCallback(async (
     name: string,
     claimedSkills: string,
@@ -409,7 +432,6 @@ export function useCredChain() {
     }
   }, [startTx, succeedTx, failTx, sendWrite]);
 
-  // ── stakeBond ──────────────────────────────────────────────────────────────
   const stakeBond = useCallback(async (amount: number): Promise<{ success: boolean; hash?: string; error?: string }> => {
     startTx(`Staking bond of ${amount} units...`);
     try {
@@ -422,7 +444,187 @@ export function useCredChain() {
     }
   }, [startTx, succeedTx, failTx, sendWrite]);
 
-  // ── requestVerification ───────────────────────────────────────────────────
+  // ── registerCandidateExtended ──────────────────────────────────────────────
+  const registerCandidateExtended = useCallback(async (
+    name: string,
+    claimedSkills: string,
+    githubUrl: string,
+    portfolioUrl: string,
+    leetcodeUser: string,
+    stackoverflowId: string,
+    cvUrl: string
+  ): Promise<{ success: boolean; hash?: string; error?: string }> => {
+    startTx('Registering candidate profile on-chain...');
+    try {
+      const hash = await sendWrite('register_candidate_extended', [
+        name, claimedSkills, githubUrl, portfolioUrl,
+        leetcodeUser, stackoverflowId, cvUrl
+      ]);
+      succeedTx(hash, 'Candidate profile registered successfully!');
+      return { success: true, hash };
+    } catch (e) {
+      failTx(e);
+      return { success: false, error: friendlyError(e) };
+    }
+  }, [startTx, succeedTx, failTx, sendWrite]);
+
+  // ── stake ──────────────────────────────────────────────────────────────────
+  const stake = useCallback(async (amount: number): Promise<{ success: boolean; hash?: string; error?: string }> => {
+    startTx(`Staking ${amount} GEN...`);
+    try {
+      const hash = await sendWrite('stake', [BigInt(amount)], BigInt(amount));
+      succeedTx(hash, `Successfully staked ${amount} GEN!`);
+      return { success: true, hash };
+    } catch (e) {
+      failTx(e);
+      return { success: false, error: friendlyError(e) };
+    }
+  }, [startTx, succeedTx, failTx, sendWrite]);
+
+  // ── unstake ────────────────────────────────────────────────────────────────
+  const unstake = useCallback(async (amount: number): Promise<{ success: boolean; hash?: string; error?: string }> => {
+    startTx(`Unstaking ${amount} GEN...`);
+    try {
+      const hash = await sendWrite('unstake', [BigInt(amount)]);
+      succeedTx(hash, `Successfully unstaked ${amount} GEN!`);
+      return { success: true, hash };
+    } catch (e) {
+      failTx(e);
+      return { success: false, error: friendlyError(e) };
+    }
+  }, [startTx, succeedTx, failTx, sendWrite]);
+
+  // ── generateInterviewQuestions ─────────────────────────────────────────────
+  const generateInterviewQuestions = useCallback(async (candidateAddress: string): Promise<string | null> => {
+    startTx('AI generating technical interview questions... (30–60s)');
+    try {
+      const hash = await sendWrite('generate_interview_questions', [toCalldataAddress(candidateAddress)]);
+      succeedTx(hash, 'AI Interview questions generated!');
+      return hash;
+    } catch (e) {
+      failTx(e);
+      return null;
+    }
+  }, [startTx, succeedTx, failTx, sendWrite]);
+
+  // ── submitInterviewAnswers ─────────────────────────────────────────────────
+  const submitInterviewAnswers = useCallback(async (candidateAddress: string, answers: string[]): Promise<string | null> => {
+    startTx('Submitting interview answers on-chain...');
+    try {
+      const hash = await sendWrite('submit_interview_answers', [toCalldataAddress(candidateAddress), JSON.stringify(answers)]);
+      succeedTx(hash, 'Interview answers submitted!');
+      return hash;
+    } catch (e) {
+      failTx(e);
+      return null;
+    }
+  }, [startTx, succeedTx, failTx, sendWrite]);
+
+  // ── gradeInterview ─────────────────────────────────────────────────────────
+  const gradeInterview = useCallback(async (candidateAddress: string): Promise<string | null> => {
+    startTx('AI validators grading interview answers... (30–60s)');
+    try {
+      const hash = await sendWrite('grade_interview', [toCalldataAddress(candidateAddress)]);
+      succeedTx(hash, 'Interview graded!');
+      return hash;
+    } catch (e) {
+      failTx(e);
+      return null;
+    }
+  }, [startTx, succeedTx, failTx, sendWrite]);
+
+  // ── createJobBounty ────────────────────────────────────────────────────────
+  const createJobBounty = useCallback(async (title: string, requiredSkills: string, bountyAmount: number): Promise<string | null> => {
+    startTx(`Creating job bounty and locking ${bountyAmount} GEN in escrow...`);
+    try {
+      const hash = await sendWrite('create_job_bounty', [title, requiredSkills, BigInt(bountyAmount)], BigInt(bountyAmount));
+      succeedTx(hash, 'Job bounty created and escrow locked successfully!');
+      return hash;
+    } catch (e) {
+      failTx(e);
+      return null;
+    }
+  }, [startTx, succeedTx, failTx, sendWrite]);
+
+  // ── cancelJobBounty ────────────────────────────────────────────────────────
+  const cancelJobBounty = useCallback(async (jobId: string): Promise<string | null> => {
+    startTx('Cancelling job bounty and refunding escrow...');
+    try {
+      const hash = await sendWrite('cancel_job_bounty', [BigInt(jobId)]);
+      succeedTx(hash, 'Job bounty cancelled and refund processed!');
+      return hash;
+    } catch (e) {
+      failTx(e);
+      return null;
+    }
+  }, [startTx, succeedTx, failTx, sendWrite]);
+
+  // ── applyToJobBounty ───────────────────────────────────────────────────────
+  const applyToJobBounty = useCallback(async (jobId: string): Promise<string | null> => {
+    startTx('Submitting job application...');
+    try {
+      const hash = await sendWrite('apply_to_job_bounty', [BigInt(jobId)]);
+      succeedTx(hash, 'Successfully applied to job bounty!');
+      return hash;
+    } catch (e) {
+      failTx(e);
+      return null;
+    }
+  }, [startTx, succeedTx, failTx, sendWrite]);
+
+  // ── awardJobBounty ─────────────────────────────────────────────────────────
+  const awardJobBounty = useCallback(async (jobId: string, winnerAddress: string): Promise<string | null> => {
+    startTx('Releasing job bounty escrow to candidate...');
+    try {
+      const hash = await sendWrite('award_job_bounty', [BigInt(jobId), toCalldataAddress(winnerAddress)]);
+      succeedTx(hash, 'Job bounty awarded and escrow released!');
+      return hash;
+    } catch (e) {
+      failTx(e);
+      return null;
+    }
+  }, [startTx, succeedTx, failTx, sendWrite]);
+
+  // ── submitAppeal ───────────────────────────────────────────────────────────
+  const submitAppeal = useCallback(async (reasoning: string): Promise<{ success: boolean; hash?: string; error?: string }> => {
+    startTx('Submitting appeal with 100 GEN fee...');
+    try {
+      const hash = await sendWrite('submit_appeal', [reasoning], 100n);
+      succeedTx(hash, 'Appeal submitted successfully!');
+      return { success: true, hash };
+    } catch (e) {
+      failTx(e);
+      return { success: false, error: friendlyError(e) };
+    }
+  }, [startTx, succeedTx, failTx, sendWrite]);
+
+  // ── executeAppeal ──────────────────────────────────────────────────────────
+  const executeAppeal = useCallback(async (candidateAddress: string): Promise<string | null> => {
+    startTx('Supreme validators reviewing appeal evidence... (30–60s)');
+    try {
+      const hash = await sendWrite('execute_appeal', [toCalldataAddress(candidateAddress)]);
+      succeedTx(hash, 'Appeal review complete!');
+      return hash;
+    } catch (e) {
+      failTx(e);
+      return null;
+    }
+  }, [startTx, succeedTx, failTx, sendWrite]);
+
+  // ── migrateCandidate ───────────────────────────────────────────────────────
+  const migrateCandidate = useCallback(async (oldContractAddress: string): Promise<string | null> => {
+    startTx('Migrating candidate history from old contract...');
+    try {
+      const hash = await sendWrite('migrate_candidate', [toCalldataAddress(oldContractAddress)]);
+      succeedTx(hash, 'Candidate history migrated!');
+      return hash;
+    } catch (e) {
+      failTx(e);
+      return null;
+    }
+  }, [startTx, succeedTx, failTx, sendWrite]);
+
+  // ── requestVerification ────────────────────────────────────────────────────
   const requestVerification = useCallback(async (candidateAddress: string): Promise<string | null> => {
     const trimmedAddr = candidateAddress.trim();
     if (!trimmedAddr) {
@@ -443,7 +645,7 @@ export function useCredChain() {
     } catch (e) { failTx(e); return null; }
   }, [startTx, succeedTx, failTx, sendWrite]);
 
-  // ── executeVerification ───────────────────────────────────────────────────
+  // ── executeVerification ────────────────────────────────────────────────────
   const executeVerification = useCallback(async (requestId: string) => {
     startTx('AI validators analyzing GitHub & portfolio... (30–60s)');
     try {
@@ -456,31 +658,12 @@ export function useCredChain() {
   const getCandidateProfile = useCallback(async (addr: string): Promise<CandidateProfile | null> => {
     if (!addr || !isAddress(addr)) return null;
     const cleanAddr = addr.toLowerCase().trim();
-    console.log('[Diagnostic] getCandidateProfile call:', {
-      contractAddress: CONTRACT_ADDRESS,
-      methodName: 'get_candidate_profile',
-      arguments: [cleanAddr],
-      rpcEndpoint: 'https://studio.genlayer.com/api',
-      chainId: '61999 (0xf23f)'
-    });
     try {
       const raw = await sendRead<string>('get_candidate_profile', [toCalldataAddress(cleanAddr)]);
-      console.log('[Diagnostic] getCandidateProfile raw result:', raw);
       if (!raw || raw === '') return null;
-      const parsed = parseJson<CandidateProfile>(raw);
-      console.log('[Diagnostic] getCandidateProfile parsed result:', parsed);
-      if (!parsed) {
-        throw new Error(`Malformed JSON response for candidate profile: ${raw}`);
-      }
-      return parsed;
+      return parseJson<CandidateProfile>(raw);
     } catch (e: any) {
-      console.error('[Diagnostic] getCandidateProfile error details:', {
-        error: e,
-        message: e?.message,
-        shortMessage: e?.shortMessage,
-        details: e?.details,
-        stack: e?.stack,
-      });
+      console.error('[Diagnostic] getCandidateProfile error:', e);
       throw e;
     }
   }, []);
@@ -488,22 +671,12 @@ export function useCredChain() {
   const getVerificationResult = useCallback(async (addr: string): Promise<VerificationResult | null> => {
     if (!addr || !isAddress(addr)) return null;
     const cleanAddr = addr.toLowerCase().trim();
-    console.log('[Diagnostic] getVerificationResult call:', {
-      contractAddress: CONTRACT_ADDRESS,
-      methodName: 'get_verification_result',
-      arguments: [cleanAddr],
-      rpcEndpoint: 'https://studio.genlayer.com/api',
-      chainId: '61999 (0xf23f)'
-    });
     try {
       const raw = await sendRead<string>('get_verification_result', [toCalldataAddress(cleanAddr)]);
-      console.log('[Diagnostic] getVerificationResult raw result:', raw);
       if (!raw || raw === '') return null;
-      const parsed = parseJson<VerificationResult>(raw);
-      console.log('[Diagnostic] getVerificationResult parsed result:', parsed);
-      return parsed;
+      return parseJson<VerificationResult>(raw);
     } catch (e: any) {
-      console.error('[Diagnostic] getVerificationResult error details:', e);
+      console.error('[Diagnostic] getVerificationResult error:', e);
       throw e;
     }
   }, []);
@@ -513,7 +686,6 @@ export function useCredChain() {
     const cleanAddr = addr.toLowerCase().trim();
     try {
       const res = await sendRead<boolean>('is_blacklisted', [toCalldataAddress(cleanAddr)]);
-      console.log('[Diagnostic] isBlacklisted result:', res);
       return res;
     } catch (e) {
       console.error('[Diagnostic] isBlacklisted error:', e);
@@ -526,7 +698,6 @@ export function useCredChain() {
     const cleanAddr = addr.toLowerCase().trim();
     try {
       const raw = await sendRead<bigint>('get_stake', [toCalldataAddress(cleanAddr)]);
-      console.log('[Diagnostic] getStake result:', raw);
       return Number(raw);
     } catch (e) {
       console.error('[Diagnostic] getStake error:', e);
@@ -534,10 +705,167 @@ export function useCredChain() {
     }
   }, []);
 
+  const getReputationScore = useCallback(async (addr: string): Promise<number> => {
+    if (!addr || !isAddress(addr)) return 0;
+    const cleanAddr = addr.toLowerCase().trim();
+    try {
+      const raw = await sendRead<bigint>('get_reputation_score', [toCalldataAddress(cleanAddr)]);
+      return Number(raw);
+    } catch (e) {
+      console.error('[Diagnostic] getReputationScore error:', e);
+      return 0;
+    }
+  }, []);
+
+  const getCandidateTier = useCallback(async (addr: string): Promise<string> => {
+    if (!addr || !isAddress(addr)) return 'NONE';
+    const cleanAddr = addr.toLowerCase().trim();
+    try {
+      const raw = await sendRead<string>('get_candidate_tier', [toCalldataAddress(cleanAddr)]);
+      return raw || 'NONE';
+    } catch (e) {
+      console.error('[Diagnostic] getCandidateTier error:', e);
+      return 'NONE';
+    }
+  }, []);
+
+  const getInterviewQuestions = useCallback(async (addr: string): Promise<string[]> => {
+    if (!addr || !isAddress(addr)) return [];
+    const cleanAddr = addr.toLowerCase().trim();
+    try {
+      const raw = await sendRead<string>('get_interview_questions', [toCalldataAddress(cleanAddr)]);
+      if (!raw || raw === '') return [];
+      return JSON.parse(raw) as string[];
+    } catch (e) {
+      console.error('[Diagnostic] getInterviewQuestions error:', e);
+      return [];
+    }
+  }, []);
+
+  const getInterviewAnswers = useCallback(async (addr: string): Promise<string[]> => {
+    if (!addr || !isAddress(addr)) return [];
+    const cleanAddr = addr.toLowerCase().trim();
+    try {
+      const raw = await sendRead<string>('get_interview_answers', [toCalldataAddress(cleanAddr)]);
+      if (!raw || raw === '') return [];
+      return JSON.parse(raw) as string[];
+    } catch (e) {
+      console.error('[Diagnostic] getInterviewAnswers error:', e);
+      return [];
+    }
+  }, []);
+
+  const getInterviewScore = useCallback(async (addr: string): Promise<number> => {
+    if (!addr || !isAddress(addr)) return 0;
+    const cleanAddr = addr.toLowerCase().trim();
+    try {
+      const raw = await sendRead<bigint>('get_interview_score', [toCalldataAddress(cleanAddr)]);
+      return Number(raw);
+    } catch (e) {
+      console.error('[Diagnostic] getInterviewScore error:', e);
+      return 0;
+    }
+  }, []);
+
+  const getInterviewStatus = useCallback(async (addr: string): Promise<string> => {
+    if (!addr || !isAddress(addr)) return 'NOT_STARTED';
+    const cleanAddr = addr.toLowerCase().trim();
+    try {
+      const raw = await sendRead<string>('get_interview_status', [toCalldataAddress(cleanAddr)]);
+      return raw || 'NOT_STARTED';
+    } catch (e) {
+      console.error('[Diagnostic] getInterviewStatus error:', e);
+      return 'NOT_STARTED';
+    }
+  }, []);
+
+  const getJobBounty = useCallback(async (jobId: string): Promise<any | null> => {
+    try {
+      const raw = await sendRead<string>('get_job_bounty', [BigInt(jobId)]);
+      if (!raw || raw === '') return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      console.error('[Diagnostic] getJobBounty error:', e);
+      return null;
+    }
+  }, []);
+
+  const getJobEscrow = useCallback(async (jobId: string): Promise<number> => {
+    try {
+      const raw = await sendRead<bigint>('get_job_escrow', [BigInt(jobId)]);
+      return Number(raw);
+    } catch (e) {
+      console.error('[Diagnostic] getJobEscrow error:', e);
+      return 0;
+    }
+  }, []);
+
+  const getJobApplicants = useCallback(async (jobId: string): Promise<string[]> => {
+    try {
+      const raw = await sendRead<string>('get_job_applicants', [BigInt(jobId)]);
+      if (!raw || raw === '') return [];
+      return JSON.parse(raw) as string[];
+    } catch (e) {
+      console.error('[Diagnostic] getJobApplicants error:', e);
+      return [];
+    }
+  }, []);
+
+  const getAppeal = useCallback(async (addr: string): Promise<any | null> => {
+    if (!addr || !isAddress(addr)) return null;
+    const cleanAddr = addr.toLowerCase().trim();
+    try {
+      const raw = await sendRead<string>('get_appeal', [toCalldataAddress(cleanAddr)]);
+      if (!raw || raw === '') return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      console.error('[Diagnostic] getAppeal error:', e);
+      return null;
+    }
+  }, []);
+
+  const getAppealUsed = useCallback(async (addr: string): Promise<boolean> => {
+    if (!addr || !isAddress(addr)) return false;
+    const cleanAddr = addr.toLowerCase().trim();
+    try {
+      const raw = await sendRead<boolean>('get_appeal_used', [toCalldataAddress(cleanAddr)]);
+      return !!raw;
+    } catch (e) {
+      console.error('[Diagnostic] getAppealUsed error:', e);
+      return false;
+    }
+  }, []);
+
+  const getJobBounties = useCallback(async (filter?: 'OPEN' | 'CLOSED'): Promise<any[]> => {
+    const list: any[] = [];
+    let i = 0n;
+    while (true) {
+      try {
+        const raw = await sendRead<string>('get_job_bounty', [i]);
+        if (!raw || raw === '') break;
+        const job = JSON.parse(raw);
+        if (!filter || job.status === filter) {
+          list.push(job);
+        }
+        i++;
+      } catch (e) {
+        break;
+      }
+    }
+    return list;
+  }, []);
+
   return {
     txState, resetTx, succeedTx,
     registerCandidate, stakeBond, requestVerification, executeVerification,
+    registerCandidateExtended, stake, unstake,
+    generateInterviewQuestions, submitInterviewAnswers, gradeInterview,
+    createJobBounty, cancelJobBounty, applyToJobBounty, awardJobBounty,
+    submitAppeal, executeAppeal, migrateCandidate,
     getCandidateProfile, getVerificationResult, isBlacklisted, getStake,
+    getReputationScore, getCandidateTier, getInterviewQuestions, getInterviewAnswers,
+    getInterviewScore, getInterviewStatus, getJobBounty, getJobEscrow, getJobApplicants,
+    getAppeal, getAppealUsed, getJobBounties,
     callerAddress: address ?? '',
     contractAddress: CONTRACT_ADDRESS,
   };

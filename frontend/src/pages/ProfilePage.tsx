@@ -7,7 +7,10 @@ import { useCredChain, type CandidateProfile, type VerificationResult } from '..
 export function ProfilePage() {
   const { address: routeAddress } = useParams<{ address: string }>();
   const navigate = useNavigate();
-  const { getCandidateProfile, getVerificationResult, getStake, isBlacklisted } = useCredChain();
+  const {
+    getCandidateProfile, getVerificationResult, getStake, isBlacklisted,
+    getReputationScore, getCandidateTier, getInterviewScore, getInterviewStatus,
+  } = useCredChain();
 
   const [searchAddr, setSearchAddr] = useState(routeAddress || '');
   const [profile, setProfile] = useState<CandidateProfile | null>(null);
@@ -18,6 +21,12 @@ export function ProfilePage() {
   const [searched, setSearched] = useState(false);
   const [errorState, setErrorState] = useState<string | null>(null);
 
+  // v2 fields
+  const [reputation, setReputation] = useState<number>(0);
+  const [tier, setTier] = useState<string>('NONE');
+  const [interviewScore, setInterviewScore] = useState<number>(0);
+  const [interviewStatus, setInterviewStatus] = useState<string>('NOT_STARTED');
+
   const loadProfile = async (addr: string) => {
     if (!addr.trim() || addr === '0x0000000000000000000000000000000000000000') return;
     setIsLoading(true);
@@ -27,14 +36,22 @@ export function ProfilePage() {
       const p = await getCandidateProfile(addr);
       setProfile(p);
       if (p) {
-        const [r, s, b] = await Promise.all([
+        const [r, s, b, rep, t, intScore, intStatus] = await Promise.all([
           getVerificationResult(addr),
           getStake(addr),
           isBlacklisted(addr),
+          getReputationScore(addr),
+          getCandidateTier(addr),
+          getInterviewScore(addr),
+          getInterviewStatus(addr),
         ]);
         setResult(r);
         setStake(s);
         setBlacklisted(b);
+        setReputation(rep);
+        setTier(t);
+        setInterviewScore(intScore);
+        setInterviewStatus(intStatus);
       }
     } catch (err: any) {
       console.error('[ProfilePage] loadProfile failed:', err);
@@ -64,6 +81,14 @@ export function ProfilePage() {
     return 'var(--purple-400)';
   };
 
+  const tierColor = (t: string) => {
+    if (t === 'BRONZE') return '#b45309';
+    if (t === 'SILVER') return '#94a3b8';
+    if (t === 'GOLD') return '#fbbf24';
+    if (t === 'PLATINUM') return '#38bdf8';
+    return 'var(--text-muted)';
+  };
+
   return (
     <div className="page-content fade-in">
       {/* Hero */}
@@ -71,8 +96,8 @@ export function ProfilePage() {
         <div className="hero-badge">Public Profile</div>
         <h1 className="hero-title">On-Chain Credential<br />Verification</h1>
         <p className="hero-desc">
-          View any candidate's tamper-proof skill verification. The AI verdict
-          and reasoning are permanently stored on GenLayer.
+          View any candidate's tamper-proof skill verification, reputation levels,
+          and AI interview results committed permanently on GenLayer.
         </p>
       </div>
 
@@ -156,21 +181,39 @@ export function ProfilePage() {
                 <div>
                   <div className="card-title" id="profile-name">{profile.name}</div>
                   <div className="card-subtitle">
-                    Registered {new Date(profile.registered_at * 1000).toLocaleDateString()}
+                    Registered {profile.registered_at > 0 ? new Date(profile.registered_at * 1000).toLocaleDateString() : 'Just now'}
                   </div>
                 </div>
               </div>
-              <span
-                className="verdict-badge"
-                style={{
-                  color: statusColor(profile.status),
-                  borderColor: statusColor(profile.status) + '50',
-                  background: statusColor(profile.status) + '15',
-                }}
-                id="profile-status"
-              >
-                {blacklisted ? 'BLACKLISTED' : profile.status}
-              </span>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <span
+                  className="badge"
+                  style={{
+                    color: tierColor(tier),
+                    borderColor: tierColor(tier) + '40',
+                    background: tierColor(tier) + '10',
+                    border: '1px solid',
+                    padding: '0.25rem 0.75rem',
+                    borderRadius: 4,
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                  }}
+                  title={`Staking Tier: ${tier}`}
+                >
+                  🏆 {tier} TIER
+                </span>
+                <span
+                  className="verdict-badge"
+                  style={{
+                    color: statusColor(profile.status),
+                    borderColor: statusColor(profile.status) + '50',
+                    background: statusColor(profile.status) + '15',
+                  }}
+                  id="profile-status"
+                >
+                  {blacklisted ? 'BLACKLISTED' : profile.status}
+                </span>
+              </div>
             </div>
 
             {/* Skills */}
@@ -189,31 +232,88 @@ export function ProfilePage() {
               ))}
             </div>
 
-            <hr className="divider" />
+            <hr className="divider" style={{ border: '0', borderTop: '1px solid var(--border)', margin: '1.25rem 0' }} />
 
-            <div className="info-row">
-              <span className="info-key">Address</span>
-              <span className="info-val">{routeAddress}</span>
+            <div className="info-row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+              <span className="info-key" style={{ color: 'var(--text-secondary)' }}>Address</span>
+              <span className="info-val" style={{ fontFamily: 'monospace' }}>{routeAddress}</span>
             </div>
-            <div className="info-row">
-              <span className="info-key">Bond Stake</span>
-              <span className="info-val">{stake > 0 ? stake.toLocaleString() + ' units' : blacklisted ? 'Slashed' : '—'}</span>
+            <div className="info-row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+              <span className="info-key" style={{ color: 'var(--text-secondary)' }}>Bond Stake</span>
+              <span className="info-val" style={{ fontWeight: 600 }}>{stake > 0 ? stake.toLocaleString() + ' GEN' : blacklisted ? 'Slashed' : '—'}</span>
             </div>
-            <div className="info-row">
-              <span className="info-key">GitHub</span>
-              <a href={profile.github_url} target="_blank" rel="noreferrer" className="tx-hash-link">
+            <div className="info-row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+              <span className="info-key" style={{ color: 'var(--text-secondary)' }}>Reputation Score</span>
+              <span className="info-val" style={{ fontWeight: 600, color: 'var(--green-400)' }}>{reputation}/100</span>
+            </div>
+            <div className="info-row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+              <span className="info-key" style={{ color: 'var(--text-secondary)' }}>GitHub</span>
+              <a href={profile.github_url} target="_blank" rel="noreferrer" className="tx-hash-link" style={{ color: 'var(--cyan-400)', textDecoration: 'none' }}>
                 {profile.github_url} ↗
               </a>
             </div>
             {profile.portfolio_url && (
-              <div className="info-row">
-                <span className="info-key">Portfolio</span>
-                <a href={profile.portfolio_url} target="_blank" rel="noreferrer" className="tx-hash-link">
+              <div className="info-row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+                <span className="info-key" style={{ color: 'var(--text-secondary)' }}>Portfolio</span>
+                <a href={profile.portfolio_url} target="_blank" rel="noreferrer" className="tx-hash-link" style={{ color: 'var(--cyan-400)', textDecoration: 'none' }}>
                   {profile.portfolio_url} ↗
                 </a>
               </div>
             )}
+            {profile.leetcode_user && (
+              <div className="info-row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+                <span className="info-key" style={{ color: 'var(--text-secondary)' }}>LeetCode Profile</span>
+                <a href={`https://leetcode.com/${profile.leetcode_user}`} target="_blank" rel="noreferrer" className="tx-hash-link" style={{ color: 'var(--cyan-400)', textDecoration: 'none' }}>
+                  leetcode.com/{profile.leetcode_user} ↗
+                </a>
+              </div>
+            )}
+            {profile.stackoverflow_id && (
+              <div className="info-row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+                <span className="info-key" style={{ color: 'var(--text-secondary)' }}>StackOverflow Profile</span>
+                <a href={`https://stackoverflow.com/users/${profile.stackoverflow_id}`} target="_blank" rel="noreferrer" className="tx-hash-link" style={{ color: 'var(--cyan-400)', textDecoration: 'none' }}>
+                  stackoverflow.com/users/{profile.stackoverflow_id} ↗
+                </a>
+              </div>
+            )}
+            {profile.cv_url && (
+              <div className="info-row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+                <span className="info-key" style={{ color: 'var(--text-secondary)' }}>Resume / CV</span>
+                <a href={profile.cv_url} target="_blank" rel="noreferrer" className="tx-hash-link" style={{ color: 'var(--cyan-400)', textDecoration: 'none' }}>
+                  Open Document ↗
+                </a>
+              </div>
+            )}
           </div>
+
+          {/* AI Interview Grade Panel */}
+          {interviewStatus !== 'NOT_STARTED' && (
+            <div className="card" style={{ marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong style={{ fontSize: '0.95rem' }}>AI Technical Interview Performance</strong>
+                <span
+                  className="verdict-badge"
+                  style={{
+                    color: statusColor(interviewStatus === 'GRADED' ? 'VERIFIED' : 'PENDING'),
+                    borderColor: statusColor(interviewStatus === 'GRADED' ? 'VERIFIED' : 'PENDING') + '50',
+                    background: statusColor(interviewStatus === 'GRADED' ? 'VERIFIED' : 'PENDING') + '15',
+                  }}
+                >
+                  {interviewStatus}
+                </span>
+              </div>
+              {interviewStatus === 'GRADED' && (
+                <div style={{ marginTop: '0.75rem', fontSize: '0.9rem' }}>
+                  Score: <strong style={{ color: 'var(--green-400)', fontSize: '1.25rem' }}>{interviewScore}/100</strong>
+                </div>
+              )}
+              {interviewStatus === 'NEEDS_REVIEW' && (
+                <div style={{ marginTop: '0.75rem', color: 'var(--red-400)', fontSize: '0.85rem' }}>
+                  ⚠ Consensus Deviation Detected: AI validator grades differed widely (&gt;10 pts). Status marked as NEEDS_REVIEW.
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Verification Result */}
           <VerificationResultCard result={result} profile={profile} isLoading={false} />
@@ -222,3 +322,4 @@ export function ProfilePage() {
     </div>
   );
 }
+
