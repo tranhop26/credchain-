@@ -536,11 +536,14 @@ Respond with ONLY a JSON object containing a list of strings:
             return gl.nondet.exec_prompt(prompt, response_format="json")
 
         def validator_fn(leader_result) -> bool:
+            if not hasattr(leader_result, "calldata"):
+                return False
             try:
-                try:
-                    raw = leader_result.value
-                except Exception:
-                    raw = leader_result
+                raw = leader_result.calldata
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8")
+                elif not isinstance(raw, (str, dict)):
+                    return False
                 data = robust_json_loads(raw)
                 questions = data.get("questions")
                 if not isinstance(questions, list) or len(questions) != 3:
