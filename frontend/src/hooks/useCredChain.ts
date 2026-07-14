@@ -1,10 +1,16 @@
 import { createClient } from 'genlayer-js';
 import { studionet } from 'genlayer-js/chains';
+import { CalldataAddress } from 'genlayer-js/types';
 import { useState, useCallback } from 'react';
 import { useWallet } from '../context/WalletContext';
-import { isAddress } from 'viem';
+import { isAddress, fromHex } from 'viem';
 
 const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0xDfc880de4A0463e9E4368cE86Bd2C00BC4a0552f') as `0x${string}`;
+
+function toCalldataAddress(addr: string): CalldataAddress {
+  const clean = addr.toLowerCase().trim();
+  return new CalldataAddress(fromHex(clean as `0x${string}`, 'bytes'));
+}
 
 const STUDIONET_CHAIN = {
   chainId: '0xF22F', // 61999
@@ -429,7 +435,7 @@ export function useCredChain() {
     }
     startTx('Requesting AI verification of the candidate profile...');
     try {
-      const hash = await sendWrite('request_verification', [trimmedAddr]);
+      const hash = await sendWrite('request_verification', [toCalldataAddress(trimmedAddr)]);
       const counter = await sendRead<bigint>('get_request_counter', []);
       const requestId = String(Number(counter) - 1);
       succeedTx(hash, `Verification requested! Request ID: ${requestId}`);
@@ -458,7 +464,7 @@ export function useCredChain() {
       chainId: '61999 (0xf23f)'
     });
     try {
-      const raw = await sendRead<string>('get_candidate_profile', [cleanAddr]);
+      const raw = await sendRead<string>('get_candidate_profile', [toCalldataAddress(cleanAddr)]);
       console.log('[Diagnostic] getCandidateProfile raw result:', raw);
       if (!raw || raw === '') return null;
       const parsed = parseJson<CandidateProfile>(raw);
@@ -490,7 +496,7 @@ export function useCredChain() {
       chainId: '61999 (0xf23f)'
     });
     try {
-      const raw = await sendRead<string>('get_verification_result', [cleanAddr]);
+      const raw = await sendRead<string>('get_verification_result', [toCalldataAddress(cleanAddr)]);
       console.log('[Diagnostic] getVerificationResult raw result:', raw);
       if (!raw || raw === '') return null;
       const parsed = parseJson<VerificationResult>(raw);
@@ -506,7 +512,7 @@ export function useCredChain() {
     if (!addr || !isAddress(addr)) return false;
     const cleanAddr = addr.toLowerCase().trim();
     try {
-      const res = await sendRead<boolean>('is_blacklisted', [cleanAddr]);
+      const res = await sendRead<boolean>('is_blacklisted', [toCalldataAddress(cleanAddr)]);
       console.log('[Diagnostic] isBlacklisted result:', res);
       return res;
     } catch (e) {
@@ -519,7 +525,7 @@ export function useCredChain() {
     if (!addr || !isAddress(addr)) return 0;
     const cleanAddr = addr.toLowerCase().trim();
     try {
-      const raw = await sendRead<bigint>('get_stake', [cleanAddr]);
+      const raw = await sendRead<bigint>('get_stake', [toCalldataAddress(cleanAddr)]);
       console.log('[Diagnostic] getStake result:', raw);
       return Number(raw);
     } catch (e) {
