@@ -16,22 +16,30 @@ export function ProfilePage() {
   const [blacklisted, setBlacklisted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [errorState, setErrorState] = useState<string | null>(null);
 
   const loadProfile = async (addr: string) => {
     if (!addr.trim() || addr === '0x0000000000000000000000000000000000000000') return;
     setIsLoading(true);
     setSearched(true);
+    setErrorState(null);
     try {
-      const [p, r, s, b] = await Promise.all([
-        getCandidateProfile(addr),
-        getVerificationResult(addr),
-        getStake(addr),
-        isBlacklisted(addr),
-      ]);
+      const p = await getCandidateProfile(addr);
       setProfile(p);
-      setResult(r);
-      setStake(s);
-      setBlacklisted(b);
+      if (p) {
+        const [r, s, b] = await Promise.all([
+          getVerificationResult(addr),
+          getStake(addr),
+          isBlacklisted(addr),
+        ]);
+        setResult(r);
+        setStake(s);
+        setBlacklisted(b);
+      }
+    } catch (err: any) {
+      console.error('[ProfilePage] loadProfile failed:', err);
+      const msg = err.message || err.details || String(err);
+      setErrorState(msg);
     } finally {
       setIsLoading(false);
     }
@@ -98,6 +106,13 @@ export function ProfilePage() {
         </form>
       </div>
 
+      {errorState && (
+        <div className="error-alert fade-in" style={{ marginBottom: '1.5rem' }}>
+          <span style={{ flexShrink: 0 }}>⚠</span>
+          <span>Read/Sync Error: {errorState}</span>
+        </div>
+      )}
+
       {/* Loading */}
       {isLoading && (
         <div className="card fade-in" style={{ textAlign: 'center', padding: '3rem' }}>
@@ -107,7 +122,7 @@ export function ProfilePage() {
       )}
 
       {/* Not found */}
-      {searched && !isLoading && !profile && (
+      {searched && !isLoading && !profile && !errorState && (
         <div className="card fade-in">
           <div className="empty-state">
             <div className="empty-state-icon">🔎</div>
