@@ -848,7 +848,7 @@ export function useCredChain() {
           list.push(job);
         }
         i++;
-      } catch (e) {
+      } catch {
         break;
       }
     }
