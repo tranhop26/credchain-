@@ -76,6 +76,7 @@ Employer                                │
 
 ### Method Signatures
 
+#### Core & Verification Flow
 - `register_candidate(name: str, claimed_skills: str, github_url: str, portfolio_url: str) -> None`
   Registers a candidate profile on-chain. Stored profile is initialized as `PENDING`.
 - `stake_bond(amount: u256) -> None`
@@ -88,6 +89,36 @@ Employer                                │
   View candidate profile.
 - `get_verification_result(address: Address) -> str`
   View verification result verdict and reasoning.
+
+#### Premium Features (v2)
+- `register_candidate_extended(name: str, claimed_skills: str, github_url: str, portfolio_url: str, leetcode_user: str, stackoverflow_id: str, cv_url: str) -> None`
+  Registers a candidate profile on-chain with extra profile handles and verified links.
+- `stake(amount: u256) -> None`
+  Stake GEN token bond to increase tier levels (Bronze, Silver, Gold, Platinum).
+- `unstake(amount: u256) -> None`
+  Unstake GEN token bond.
+- `generate_interview_questions(candidate_address: Address) -> None`
+  GenVM non-deterministic Prompt execution to generate customized tech questions based on candidate skills.
+- `submit_interview_answers(candidate_address: Address, answers_list: str) -> None`
+  Submits technical interview answers on-chain.
+- `grade_interview(candidate_address: Address) -> None`
+  Grades interview answers using GenVM validators and updates candidate's reputation score.
+- `create_job_bounty(title: str, required_skills: str, bounty_amount: u256) -> u256`
+  Creates a job listing and locks GEN tokens in escrow.
+- `cancel_job_bounty(job_id: u256) -> None`
+  Cancels job listing and returns locked escrow to employer.
+- `apply_to_job_bounty(job_id: u256) -> None`
+  Candidate wallet applies to an active job bounty.
+- `award_job_bounty(job_id: u256, winner_address: Address) -> None`
+  Awards job bounty and releases escrow to selected applicant.
+- `submit_appeal(reasoning: str) -> None`
+  Disputes verification results or blacklisting with a 100 GEN deposit.
+- `execute_appeal(candidate_address: Address) -> None`
+  Executes supreme validators review on appeal evidence.
+- `get_candidate_full_state(address: Address) -> str`
+  Batch fetches candidate metadata (profile, result, stake, reputation, tier, interview, appeal) in a single RPC read.
+- `get_active_jobs_full() -> str`
+  Batch fetches all active job listings including escrow balances and applicant addresses.
 
 
 ### What `web.render` reads
@@ -194,7 +225,7 @@ cd frontend && npm run dev
 
 - **App:** https://credchain-eight.vercel.app/
 - **Video:** [YOUTUBE/LOOM — add after recording]
-- **Contract:** `0xDfc880de4A0463e9E4368cE86Bd2C00BC4a0552f` (GenLayer Studionet)
+- **Contract:** `0xfd36224cc3ea472223d31143C887f11A7B27e11b` (GenLayer Studionet)
 
 ---
 
