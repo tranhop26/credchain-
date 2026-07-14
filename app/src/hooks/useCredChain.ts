@@ -5,7 +5,7 @@ import { useState, useCallback } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { isAddress, fromHex } from 'viem';
 
-const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0x7a474602Df6476E5555cE4359b366939F6e9F796') as `0x${string}`;
+const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0xbb47F03c7f56B5be9C465E535a11cb533d840029') as `0x${string}`;
 
 function toCalldataAddress(addr: string): CalldataAddress {
   const clean = addr.toLowerCase().trim();

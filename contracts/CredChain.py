@@ -617,11 +617,14 @@ Respond with ONLY a JSON object containing:
             return gl.nondet.exec_prompt(prompt, response_format="json")
 
         def validator_fn(leader_result) -> bool:
+            if not hasattr(leader_result, "calldata"):
+                return False
             try:
-                try:
-                    raw = leader_result.value
-                except Exception:
-                    raw = leader_result
+                raw = leader_result.calldata
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8")
+                elif not isinstance(raw, (str, dict)):
+                    return False
                 data = robust_json_loads(raw)
                 leader_score = data.get("score")
                 if not isinstance(leader_score, int) or not (0 <= leader_score <= 100):
@@ -791,11 +794,14 @@ Respond with ONLY a JSON object (no markdown):
             return gl.nondet.exec_prompt(analysis_task, response_format="json")
 
         def validator_fn(leader_result) -> bool:
+            if not hasattr(leader_result, "calldata"):
+                return False
             try:
-                try:
-                    raw = leader_result.value
-                except Exception:
-                    raw = leader_result
+                raw = leader_result.calldata
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8")
+                elif not isinstance(raw, (str, dict)):
+                    return False
                 data = robust_json_loads(raw)
                 if data.get("verdict") not in {"VERIFIED", "PARTIAL", "UNVERIFIED"}:
                     return False
