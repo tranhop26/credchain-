@@ -58,9 +58,9 @@ class MockNondet:
         return self.portfolio_content
 
     def exec_prompt(self, prompt: str, response_format: str = "json") -> str:
-        # Cross-check prompt detection (contains "PREVIOUS AI VERDICT")
-        if "PREVIOUS AI VERDICT" in prompt:
-            return json.dumps({"agree": True, "verdict": self._verdict_data["verdict"], "reason": "Agrees."})
+        # Cross-check prompt detection
+        if "PREVIOUS AI VERDICT" in prompt or "supports verdict" in prompt or "relevant to" in prompt or "appeal verdict" in prompt:
+            return "AGREE"
         return json.dumps(self._verdict_data)
 
 

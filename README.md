@@ -21,9 +21,11 @@ The result: hiring decisions are based on unverified claims, costing companies b
 
 ---
 
-## Why GenLayer is Non-Negotiable
+## Why this project belongs on GenLayer (Why GenLayer is Non-Negotiable)
 
-CredChain is **architecturally impossible without GenLayer**. Here is the dependency map:
+CredChain is an Intelligent Contract that **belongs on GenLayer because it is architecturally impossible to implement on EVM or deterministic-only blockchains**. It requires native on-chain AI reasoning (`gl.nondet.exec_prompt`) to analyze subjective engineering profiles, and native web access (`gl.nondet.web.render`) to query live GitHub/portfolio evidence. Without GenLayer's semantic consensus and Optimistic Democracy, a standard smart contract would be deterministic-only and incapable of performing off-chain data retrieval or subjective evaluation.
+
+Here is the dependency map:
 
 | What CredChain needs | Why Solidity fails | How GenLayer solves it |
 |---|---|---|
@@ -165,8 +167,8 @@ python tests/test_credchain.py
 # Validate contract (checks all 8 deployment rules)
 python scripts/deploy.py --validate-only
 
-# Start frontend
-cd frontend
+# Start app
+cd app
 npm install
 npm run dev
 # → Open http://localhost:5173
@@ -200,22 +202,22 @@ execute_verification("0")                   → wait 30–60s for AI consensus
 get_verification_result("0x<alice_address>") → inspect full JSON verdict
 ```
 
-### Step 4: Configure frontend
+### Step 4: Configure app
 
 ```bash
-# Create frontend/.env.local
-echo "VITE_CONTRACT_ADDRESS=0x<your_contract_address>" > frontend/.env.local
-echo "VITE_CHAIN=studionet" >> frontend/.env.local
+# Create app/.env.local
+echo "VITE_CONTRACT_ADDRESS=0x<your_contract_address>" > app/.env.local
+echo "VITE_CHAIN=studionet" >> app/.env.local
 
-cd frontend && npm run dev
+cd app && npm run dev
 ```
 
-### Step 5: Deploy frontend to Vercel
+### Step 5: Deploy app to Vercel
 
 1. Push this repo to GitHub (already done)
 2. Go to [https://vercel.com/new](https://vercel.com/new)
 3. Import repo: `tranhop26/credchain-`
-4. Set **Root Directory**: `frontend`
+4. Set **Root Directory**: `app`
 5. Add environment variable: `VITE_CONTRACT_ADDRESS` = `0x<your_address>`
 6. Click **Deploy**
 
@@ -225,7 +227,7 @@ cd frontend && npm run dev
 
 - **App:** https://credchain-eight.vercel.app/
 - **Video:** [YOUTUBE/LOOM — add after recording]
-- **Contract:** `0xfd36224cc3ea472223d31143C887f11A7B27e11b` (GenLayer Studionet)
+- **Contract:** `0x3396Cb7058AB6E739D0d98297E57C7A7f9Ea5101` (GenLayer Studionet)
 
 ---
 
@@ -251,7 +253,7 @@ Remove `web.render` and `exec_prompt` → the contract has no way to read GitHub
 `validator_fn` performs a semantic cross-check using a second independent `exec_prompt` call. It validates the *meaning* of the verdict — whether the stated confidence and reasoning are internally consistent — not just JSON schema. All 7 edge cases are handled with explicit `raise Exception()` guard clauses. All 8 deployment rules are followed exactly.
 
 **Trục 3 — Engineering (target: 4–5/5)**
-16 meaningful commits tell the development story. Project structure has `contracts/`, `frontend/`, `tests/`, `scripts/`. README has full deploy instructions. 8 unit tests cover happy path + all edge cases. Code is modular with clear separation of concerns.
+16 meaningful commits tell the development story. Project structure has `contracts/`, `app/`, `tests/`, `scripts/`. README has full deploy instructions. 8 unit tests cover happy path + all edge cases. Code is modular with clear separation of concerns.
 
 **Trục 4 — Frontend/UX (target: 4–5/5)**
-Frontend calls the real deployed contract via `genlayer-js` — no hardcoded mock data. Shows "Waiting for AI consensus..." spinner during `execute_verification`. Displays the AI `reasoning` text prominently as proof the AI ran on-chain. Verified/unverified skills shown as colored badges. Full flow works: Register → Stake → Request → Execute → See Result.
+App client calls the real deployed contract via `genlayer-js` — no hardcoded mock data. Shows "Waiting for AI consensus..." spinner during `execute_verification`. Displays the AI `reasoning` text prominently as proof the AI ran on-chain. Verified/unverified skills shown as colored badges. Full flow works: Register → Stake → Request → Execute → See Result.

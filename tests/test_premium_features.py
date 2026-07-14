@@ -41,6 +41,8 @@ class MockNondet:
         self.verdict_to_return = "VERIFIED"
 
     def exec_prompt(self, prompt: str, response_format: str = "json") -> str:
+        if "agree" in prompt.lower() or "relevant to" in prompt.lower() or "supports verdict" in prompt.lower():
+            return "AGREE"
         if "interview" in prompt.lower():
             if "grade" in prompt.lower():
                 return json.dumps({"score": self.score_to_return, "feedback": "Good response"})

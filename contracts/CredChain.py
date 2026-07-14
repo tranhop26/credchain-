@@ -398,6 +398,12 @@ Respond with ONLY a JSON object (no markdown):
                 reasoning = data.get("reasoning", "")
                 if not isinstance(reasoning, str) or len(reasoning.strip()) < 10:
                     return False
+                
+                # Semantic validator cross-check
+                cross_prompt = f"Check if reasoning '{reasoning}' supports verdict '{data.get('verdict')}' for claimed skills '{claimed_skills}'. Respond with AGREE or DISAGREE."
+                val_res = gl.nondet.exec_prompt(cross_prompt)
+                if "AGREE" not in val_res:
+                    return False
                 return True
             except Exception:
                 return False
@@ -467,6 +473,12 @@ Respond with ONLY a JSON object containing a list of strings:
                 for q in questions:
                     if not isinstance(q, str) or len(q.strip()) < 10:
                         return False
+                
+                # Semantic validator cross-check
+                cross_prompt = f"Are these questions relevant to {claimed_skills}: {', '.join(questions)}? Respond with AGREE or DISAGREE."
+                val_res = gl.nondet.exec_prompt(cross_prompt)
+                if "AGREE" not in val_res:
+                    return False
                 return True
             except Exception:
                 return False
@@ -713,6 +725,12 @@ Respond with ONLY a JSON object (no markdown):
                     raw = leader_result
                 data = robust_json_loads(raw)
                 if data.get("verdict") not in {"VERIFIED", "PARTIAL", "UNVERIFIED"}:
+                    return False
+                
+                # Semantic validator cross-check
+                cross_prompt = f"Validate if appeal verdict '{data.get('verdict')}' and reasoning '{data.get('reasoning', '')}' are justified for appeal '{appeal_reason}'. Respond with AGREE or DISAGREE."
+                val_res = gl.nondet.exec_prompt(cross_prompt)
+                if "AGREE" not in val_res:
                     return False
                 return True
             except Exception:

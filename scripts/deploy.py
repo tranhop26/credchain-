@@ -122,11 +122,11 @@ STEP 2: Deploy CredChain main contract
   c) Click the deploy tx in sidebar -> verify "Result: SUCCESS"
   d) Copy the Contract Address shown in the sidebar
 
-STEP 3: Connect frontend
-  a) Create frontend/.env.local with:
+STEP 3: Connect app
+  a) Create app/.env.local with:
        VITE_CONTRACT_ADDRESS=0x<your_contract_address>
        VITE_CHAIN=studionet
-  b) cd frontend && npm run dev
+  b) cd app && npm run dev
   c) Open http://localhost:5173
 
 STEP 4: Test the full flow in Studio
@@ -136,11 +136,11 @@ STEP 4: Test the full flow in Studio
   4. Call execute_verification(<request_id>) -- wait 30-60s for AI consensus
   5. Call get_verification_result(<address>) -> inspect the JSON verdict
 
-STEP 5: Deploy frontend to Vercel
+STEP 5: Deploy app to Vercel
   - Push repo to GitHub (already done)
   - Go to https://vercel.com/new
   - Import repo: tranhop26/credchain-
-  - Set Root Directory: frontend
+  - Set Root Directory: app
   - Add Environment Variable: VITE_CONTRACT_ADDRESS=<your_address>
   - Click Deploy
 
