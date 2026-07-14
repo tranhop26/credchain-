@@ -312,7 +312,7 @@ export function EmployerPage() {
                 onClick={handleRequestVerification}
               >
                 {txState.status === 'pending' && verifyStep === 1
-                  ? <><span className="tx-spinner" style={{ width: 14, height: 14 }} /> Requesting...</>
+                  ? <><span className="tx-spinner" style={{ width: 14, height: 14 }} /> Đang chờ đồng thuận từ GenLayer validators...</>
                   : 'Request Verification'
                 }
               </button>
@@ -362,7 +362,7 @@ export function EmployerPage() {
                 onClick={handleExecute}
               >
                 {txState.status === 'pending' && verifyStep >= 2
-                  ? <><span className="tx-spinner" style={{ width: 14, height: 14 }} /> AI Analyzing...</>
+                  ? <><span className="tx-spinner" style={{ width: 14, height: 14 }} /> Đang chờ đồng thuận từ GenLayer validators...</>
                   : '🤖 Execute AI Verification'
                 }
               </button>
@@ -539,7 +539,10 @@ export function EmployerPage() {
                               onClick={() => handleCancelJob(String(job.id))}
                               disabled={txState.status === 'pending'}
                             >
-                              Cancel Job & Refund
+                              {txState.status === 'pending'
+                                ? 'Đang chờ đồng thuận...'
+                                : 'Cancel Job & Refund'
+                              }
                             </button>
 
                             {job.applicants && job.applicants.length > 0 && (
@@ -562,7 +565,10 @@ export function EmployerPage() {
                                   onClick={() => handleAwardJob(String(job.id))}
                                   disabled={txState.status === 'pending' || !selectedWinner[job.id]}
                                 >
-                                  Award Bounty
+                                  {txState.status === 'pending'
+                                    ? 'Đang chờ đồng thuận...'
+                                    : 'Award Bounty'
+                                  }
                                 </button>
                               </div>
                             )}
@@ -580,9 +586,11 @@ export function EmployerPage() {
                               job.applicants?.some((app: string) => app.toLowerCase() === callerAddress.toLowerCase())
                             }
                           >
-                            {job.applicants?.some((app: string) => app.toLowerCase() === callerAddress.toLowerCase())
-                              ? '✓ Applied'
-                              : 'Apply to Bounty'
+                            {txState.status === 'pending'
+                              ? 'Đang chờ đồng thuận...'
+                              : job.applicants?.some((app: string) => app.toLowerCase() === callerAddress.toLowerCase())
+                                ? '✓ Applied'
+                                : 'Apply to Bounty'
                             }
                           </button>
                         )}

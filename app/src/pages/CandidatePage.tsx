@@ -562,7 +562,10 @@ export function CandidatePage() {
                   style={{ width: '100%' }}
                   disabled={txState.status === 'pending'}
                 >
-                  Deposit Stake
+                  {txState.status === 'pending' && activeTab === 'staking'
+                    ? 'Đang chờ đồng thuận từ GenLayer validators...'
+                    : 'Deposit Stake'
+                  }
                 </button>
               </form>
 
@@ -585,7 +588,10 @@ export function CandidatePage() {
                   style={{ width: '100%' }}
                   disabled={txState.status === 'pending' || stakeAmount <= 0}
                 >
-                  Unstake GEN
+                  {txState.status === 'pending' && activeTab === 'staking'
+                    ? 'Đang chờ đồng thuận từ GenLayer validators...'
+                    : 'Unstake GEN'
+                  }
                 </button>
               </form>
             </div>
@@ -679,7 +685,10 @@ export function CandidatePage() {
                 onClick={handleGenerateQuestions}
                 disabled={txState.status === 'pending'}
               >
-                Generate AI Interview Questions
+                {txState.status === 'pending' && activeTab === 'interview'
+                  ? 'Đang chờ đồng thuận từ GenLayer validators...'
+                  : 'Generate AI Interview Questions'
+                }
               </button>
             </div>
           )}
@@ -721,7 +730,10 @@ export function CandidatePage() {
                   onClick={handleSubmitAnswers}
                   disabled={txState.status === 'pending' || answersInput.some(a => !a.trim())}
                 >
-                  Submit Interview Answers
+                  {txState.status === 'pending' && activeTab === 'interview'
+                    ? 'Đang chờ đồng thuận từ GenLayer validators...'
+                    : 'Submit Interview Answers'
+                  }
                 </button>
               )}
             </div>
@@ -738,7 +750,10 @@ export function CandidatePage() {
                 onClick={handleGradeInterview}
                 disabled={txState.status === 'pending'}
               >
-                Grade My Answers (Consensus Run)
+                {txState.status === 'pending' && activeTab === 'interview'
+                  ? 'Đang chờ đồng thuận từ GenLayer validators...'
+                  : 'Grade My Answers (Consensus Run)'
+                }
               </button>
             </div>
           )}
@@ -807,7 +822,10 @@ export function CandidatePage() {
                     onClick={handleExecuteAppeal}
                     disabled={txState.status === 'pending'}
                   >
-                    Execute Appeal Verdict (Consensus Run)
+                    {txState.status === 'pending' && activeTab === 'appeal'
+                      ? 'Đang chờ đồng thuận từ GenLayer validators...'
+                      : 'Execute Appeal Verdict (Consensus Run)'
+                    }
                   </button>
                 </div>
               )}

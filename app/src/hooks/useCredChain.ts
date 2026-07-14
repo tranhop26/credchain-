@@ -377,38 +377,25 @@ export function useCredChain() {
 
     console.log('[Diagnostic] Extracted Tx Hash:', txHash);
 
-    // 7. Wait for transaction receipt
-    try {
-      await readClient.waitForTransactionReceipt({
-        hash: txHash as any,
-        status: 'ACCEPTED' as any,
-        interval: 5000,
-        retries: 60,
-      });
-    } catch (e: any) {
-      console.error("CredChain transaction failure at waitForTransactionReceipt", {
-        error: e,
-        name: e?.name,
-        message: e?.message,
-        shortMessage: e?.shortMessage,
-        details: e?.details,
-        cause: e?.cause,
-        code: e?.code,
-        data: e?.data,
-        stack: e?.stack,
-      });
-
+    // 7. Wait for transaction receipt using custom polling to bypass genlayer-js localnet status bug
+    let confirmed = false;
+    for (let i = 0; i < 60; i++) {
       try {
-        const receipt = await readClient.getTransactionReceipt({ hash: txHash as any }) as any;
-        console.log('[Diagnostic] Timeout fallback receipt:', receipt);
-        const status = receipt?.status;
-        if (status === 'ACCEPTED' || status === 'FINALIZED') {
-          return txHash;
+        const tx = await readClient.getTransaction({ hash: txHash as any }) as any;
+        if (tx) {
+          const status = Number(tx.status);
+          if (status === 1 || status === 2 || status === 5 || status === 7) {
+            confirmed = true;
+            break;
+          }
         }
-      } catch (receiptErr) {
-        console.error("Failed to fetch receipt on timeout", receiptErr);
+      } catch (err) {
+        console.warn("Failed to get transaction status in hook", err);
       }
-      throw e;
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    if (!confirmed) {
+      throw new Error(`Timed out waiting for transaction ${txHash} to resolve.`);
     }
 
     return txHash;

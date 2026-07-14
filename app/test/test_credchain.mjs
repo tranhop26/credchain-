@@ -1,11 +1,11 @@
 // TASK 1 — CredChain: test request_verification + execute_verification
 // Candidate already registered from previous run — skip to verification
 import { createClient, createAccount, generatePrivateKey } from 'genlayer-js';
+import { CalldataAddress } from 'genlayer-js/types';
 import { studionet } from 'genlayer-js/chains';
-import { execSync } from 'child_process';
+import { fromHex } from 'viem';
 
 const CONTRACT = '0x3E57Cf4f4D71af895EDf695c8ad9dA09732833D3';
-const DEPLOYER = '0x47bCb22167703011df4053f7e3379cc95F068929';
 
 const readClient = createClient({ chain: studionet });
 
@@ -19,47 +19,40 @@ const writeClient = createClient({
 
 const TESTER = account.address;
 
-// Helper to write to contract using writeContract client SDK
+function toCalldataAddress(addr) {
+  return new CalldataAddress(fromHex(addr.toLowerCase().trim(), 'bytes'));
+}
+
+// Helper to write to contract using writeContract client SDK with custom receipt polling
 async function sdkWrite(functionName, args, value) {
-  try {
-    console.log(`[SDK Write] Invoking writeContract for function "${functionName}"...`);
-    const hash = await writeClient.writeContract({
-      address: CONTRACT,
-      functionName: functionName,
-      args: args,
-      value: value
-    });
-    console.log(`[SDK Write] Transaction hash received: ${hash}`);
-    console.log('[SDK Write] Waiting for transaction receipt...');
-    await readClient.waitForTransactionReceipt({
-      hash: hash,
-      status: 'ACCEPTED'
-    });
-    console.log('[SDK Write] Transaction confirmed successfully!');
-    return true;
-  } catch (e) {
-    console.warn(`[SDK Write] SDK transaction failed: ${e.message || e}. Falling back to CLI write...`);
-    return false;
+  console.log(`[SDK Write] Invoking writeContract for function "${functionName}"...`);
+  const hash = await writeClient.writeContract({
+    address: CONTRACT,
+    functionName: functionName,
+    args: args,
+    value: value
+  });
+  console.log(`[SDK Write] Transaction hash received: ${hash}`);
+  console.log('[SDK Write] Waiting for transaction receipt...');
+  
+  // Custom wait loop to bypass genlayer-js SDK localnet status mapping bug
+  const retries = 60;
+  const interval = 2000;
+  let confirmed = false;
+  for (let i = 0; i < retries; i++) {
+    const tx = await readClient.getTransaction({ hash });
+    if (tx) {
+      const status = Number(tx.status);
+      if (status === 1 || status === 2 || status === 5 || status === 7) {
+        console.log(`[SDK Write] Transaction confirmed successfully with status ${status}!`);
+        confirmed = true;
+        break;
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, interval));
   }
-}
-
-// Fallback helper to write via CLI command
-function cliWrite(method, ...args) {
-  const argStr = args.map(a => `"${a}"`).join(' ');
-  const cmd = `genlayer write ${CONTRACT} ${method} --args ${argStr}`;
-  console.log(`\n> ${cmd}`);
-  const out = execSync(cmd, { encoding: 'utf8', timeout: 120000 });
-  console.log(out.slice(0, 300));
-  return out;
-}
-
-// Router for write operations
-async function writeAction(method, ...args) {
-  const success = await sdkWrite(method, args);
-  if (!success) {
-    // If falling back to CLI, we use DEPLOYER instead of TESTER since the CLI executes as DEPLOYER
-    const mappedArgs = args.map(arg => arg === TESTER ? DEPLOYER : arg);
-    cliWrite(method, ...mappedArgs);
+  if (!confirmed) {
+    throw new Error(`Timed out waiting for transaction ${hash}`);
   }
 }
 
@@ -70,15 +63,15 @@ async function main() {
   // Verify profile exists with TESTER
   console.log('--- Check profile exists ---');
   const profile = await readClient.readContract({
-    address: CONTRACT, functionName: 'get_candidate_profile', args: [TESTER],
+    address: CONTRACT, functionName: 'get_candidate_profile', args: [toCalldataAddress(TESTER)],
   });
   console.log('Profile:', profile ? profile.slice(0, 100) : '(empty)');
 
   if (!profile || profile === '{}' || profile === '') {
     console.log('❌ Profile not found for TESTER. Registering...');
-    await writeAction('register_candidate', 'Alice Dev', 'GenLayer Python React', 'https://github.com/tranhop26', 'https://pactkeeper-lac.vercel.app');
+    await sdkWrite('register_candidate', ['Alice Dev', 'GenLayer Python React', 'https://github.com/tranhop26', 'https://pactkeeper-lac.vercel.app']);
     console.log('Staking bond...');
-    await writeAction('stake_bond', '1000');
+    await sdkWrite('stake_bond', [1000]);
   } else {
     console.log('✅ Profile found!');
   }
@@ -89,9 +82,15 @@ async function main() {
 
   // request_verification
   console.log('\n--- request_verification ---');
-  await writeAction('request_verification', TESTER);
+  await sdkWrite('request_verification', [toCalldataAddress(TESTER)]);
 
-  const after = Number(await readClient.readContract({ address: CONTRACT, functionName: 'get_request_counter', args: [] }));
+  // Delay/retry to handle simulator state synchronization
+  let after = before;
+  for (let i = 0; i < 5; i++) {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    after = Number(await readClient.readContract({ address: CONTRACT, functionName: 'get_request_counter', args: [] }));
+    if (after > before) break;
+  }
   console.log(`request_counter AFTER  = ${after}`);
 
   if (after > before) {
@@ -99,9 +98,15 @@ async function main() {
     const requestId = String(after - 1);
 
     console.log(`\n--- execute_verification("${requestId}") — AI reading GitHub... ---`);
-    await writeAction('execute_verification', requestId);
+    await sdkWrite('execute_verification', [requestId]);
 
-    const result = await readClient.readContract({ address: CONTRACT, functionName: 'get_verification_result', args: [TESTER] });
+    // Delay/retry to read the newly committed result
+    let result = '';
+    for (let i = 0; i < 5; i++) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      result = await readClient.readContract({ address: CONTRACT, functionName: 'get_verification_result', args: [toCalldataAddress(TESTER)] });
+      if (result && result !== '{}' && result !== '') break;
+    }
     console.log('\n✅ Verification result:', result ? result.slice(0, 200) : '(empty)');
   } else {
     console.log('❌ Counter did not increment — see error above');
@@ -109,4 +114,4 @@ async function main() {
   console.log('\n=== DONE ===');
 }
 
-main().catch(e => { console.error('FATAL:', e.message); process.exit(1); });
+main().catch(e => { console.error('FATAL:', e.message || e); process.exit(1); });
