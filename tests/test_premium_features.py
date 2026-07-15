@@ -61,6 +61,7 @@ class MockVm:
         class FakeVal:
             def __init__(self, val):
                 self.value = val
+                self.calldata = val
         valid = validator_fn(FakeVal(res))
         if not valid:
             raise Exception("Consensus failed in validator check")

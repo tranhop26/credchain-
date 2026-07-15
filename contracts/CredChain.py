@@ -632,6 +632,28 @@ Respond with ONLY a JSON object containing:
                 feedback = data.get("feedback", "")
                 if not isinstance(feedback, str) or len(feedback.strip()) < 10:
                     return False
+                
+                # Independent examiner cross-check
+                val_prompt = f"""You are an independent technical examiner. Grade the candidate's answers to the interview questions.
+QUESTIONS: {questions_raw}
+ANSWERS: {answers_raw}
+
+Respond with ONLY a JSON object containing:
+{{
+  "score": <integer 0-100>,
+  "feedback": "<2-3 sentences explaining the grade>"
+}}"""
+                try:
+                    val_res = gl.nondet.exec_prompt(val_prompt, response_format="json")
+                    val_data = robust_json_loads(val_res)
+                    val_score = val_data.get("score")
+                    if not isinstance(val_score, int) or not (0 <= val_score <= 100):
+                        return False
+                    if abs(leader_score - val_score) > 10:
+                        return False
+                except Exception:
+                    return False
+                
                 return True
             except Exception:
                 return False
